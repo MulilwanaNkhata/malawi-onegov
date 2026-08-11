@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # ubuntu-latest runners ship Docker + Compose v2 already; this is the
+      # exact same `docker compose up` a developer runs locally, so CI is
+      # testing the real thing, not a CI-only substitute.
+      - name: Build and start the stack
+        run: docker compose up -d --build
+
+      # Every backend service is up once the gateway's own aggregate health
+      # check (services/api-gateway/src/index.ts) says so -- it polls every
+      # downstream service's /health and only returns 200 when all of them
+      # do, so this is a real readiness gate, not a fixed sleep.
+      - name: Wait for the stack to become healthy
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fs http://localhost:4000/health/deep > /dev/null; then
+              echo "stack is healthy after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::stack did not become healthy in time"
+          curl -s http://localhost:4000/health/deep || true
+          exit 1
+
+      # The test suite logs in as the seeded REGISTRAR_SUPERVISOR and
+      # SYSTEM_ADMIN accounts (analytics, audit-verify, review endpoints) --
+      # same seed step the README has a developer run locally.
+      - name: Seed staff accounts
+        working-directory: scripts
+        run: |
+          npm install
+          npm run seed:staff
+
+      - name: Run integration tests
+        run: npm test
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: docker compose logs --tail=300
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

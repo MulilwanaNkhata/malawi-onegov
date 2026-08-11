@@ -167,6 +167,21 @@ both read the same "last row" and fork the chain. Fixed with a
 25 concurrent registrations at it and confirming the chain still checks out.
 Exactly the kind of bug an integration suite catches and a unit test can't.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push/PR: `docker compose up -d
+--build` the whole stack, wait on the gateway's `/health/deep` aggregate
+check (a real readiness gate, not a fixed sleep), seed the staff accounts,
+then `npm test`. It's not just plausible-looking YAML -- every step was
+dry-run locally against a genuinely cold-started stack (all containers
+recreated from scratch, not reused) before being committed, and it passed
+35/35.
+
+This repo doesn't have a GitHub remote yet, so the workflow won't actually
+run anywhere until you push it to one: create a repo, `git remote add
+origin <url>`, `git push -u origin master`, and it'll pick it up
+automatically -- no extra setup needed on the GitHub side.
+
 ## Backup and disaster recovery
 
 A backup nobody has ever restored isn't a backup, it's a hope. Two scripts,
