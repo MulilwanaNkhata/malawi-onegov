@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { timingSafeEqual } from "crypto";
 import type { Prisma } from "@prisma/client";
 import { db } from "../lib/db.js";
 import { computeHash, GENESIS_HASH } from "../lib/hashChain.js";
@@ -7,6 +8,12 @@ import { requireAuth, requireRole } from "../middleware/requireAuth.js";
 
 const router = Router();
 const AUDIT_SHARED_SECRET = process.env.AUDIT_SHARED_SECRET ?? "";
+
+function safeEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
 
 function serialize(event: {
   sequence: bigint;
@@ -43,7 +50,8 @@ const eventSchema = z.object({
  * not end users.
  */
 router.post("/", async (req, res) => {
-  if (req.headers["x-audit-secret"] !== AUDIT_SHARED_SECRET) {
+  const provided = req.headers["x-audit-secret"];
+  if (typeof provided !== "string" || !safeEquals(provided, AUDIT_SHARED_SECRET)) {
     return res.status(401).json({ error: "unauthorized_service_call" });
   }
   const parsed = eventSchema.safeParse(req.body);

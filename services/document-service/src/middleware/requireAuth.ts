@@ -1,8 +1,15 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
+import { timingSafeEqual } from "crypto";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-insecure-jwt-secret-change-me";
 const SERVICE_SHARED_SECRET = process.env.SERVICE_SHARED_SECRET ?? "";
+
+function safeEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
 
 interface AccessTokenClaims {
   sub: string;
@@ -31,7 +38,8 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 }
 
 export function requireService(req: Request, res: Response, next: NextFunction) {
-  if (req.headers["x-service-secret"] !== SERVICE_SHARED_SECRET) {
+  const provided = req.headers["x-service-secret"];
+  if (typeof provided !== "string" || !safeEquals(provided, SERVICE_SHARED_SECRET)) {
     return res.status(401).json({ error: "unauthorized_service_call" });
   }
   next();

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
+import { timingSafeEqual } from "crypto";
 import { db } from "../lib/db.js";
 import { requireAuth, requireRole } from "../middleware/requireAuth.js";
 import { recordAuditEvent } from "../lib/audit.js";
@@ -10,6 +11,17 @@ const router = Router();
 const SERVICE_SHARED_SECRET = process.env.SERVICE_SHARED_SECRET ?? "";
 const USSD_PIN_LOCKOUT_THRESHOLD = 5;
 const USSD_PIN_LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+
+function safeEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
+
+function isValidServiceSecret(req: { headers: Record<string, unknown> }): boolean {
+  const provided = req.headers["x-service-secret"];
+  return typeof provided === "string" && safeEquals(provided, SERVICE_SHARED_SECRET);
+}
 
 router.get("/me", requireAuth, async (req, res) => {
   const user = await db.user.findUnique({ where: { id: req.user!.sub } });
@@ -47,7 +59,7 @@ router.get(
  * duplicating identity data into every domain database.
  */
 router.get("/internal/:id", async (req, res) => {
-  if (req.headers["x-service-secret"] !== SERVICE_SHARED_SECRET) {
+  if (!isValidServiceSecret(req)) {
     return res.status(401).json({ error: "unauthorized_service_call" });
   }
   const user = await db.user.findUnique({ where: { id: req.params.id } });
@@ -96,7 +108,7 @@ const ussdAuthSchema = z.object({ phone: z.string(), pin: z.string() });
  * much smaller keyspace.
  */
 router.post("/internal/ussd-auth", async (req, res) => {
-  if (req.headers["x-service-secret"] !== SERVICE_SHARED_SECRET) {
+  if (!isValidServiceSecret(req)) {
     return res.status(401).json({ error: "unauthorized_service_call" });
   }
   const parsed = ussdAuthSchema.safeParse(req.body);

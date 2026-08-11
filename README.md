@@ -177,10 +177,43 @@ dry-run locally against a genuinely cold-started stack (all containers
 recreated from scratch, not reused) before being committed, and it passed
 35/35.
 
-This repo doesn't have a GitHub remote yet, so the workflow won't actually
-run anywhere until you push it to one: create a repo, `git remote add
-origin <url>`, `git push -u origin master`, and it'll pick it up
-automatically -- no extra setup needed on the GitHub side.
+Live at [github.com/MulilwanaNkhata/malawi-onegov](https://github.com/MulilwanaNkhata/malawi-onegov)
+-- CI runs there on every push, not just locally.
+
+## Security
+
+A manual review (auth, injection, secrets handling, access control -- same
+categories `/security-review` covers) found and fixed two real issues:
+
+- **An unauthenticated payment-completion webhook.** `POST
+  /payments/webhook/mock-provider` had no auth at all and was reachable
+  through the public gateway. Anyone who learned their own payment's
+  `referenceNumber` -- which a citizen legitimately gets back from
+  initiating the payment -- could call it directly and mark their
+  government fee "paid" without paying it. Fixed by requiring the same
+  internal service secret every other trusted-caller endpoint already
+  requires, which also more accurately mirrors how a real mobile money
+  provider's webhook would be secured (signature/shared-secret, never open).
+- **Timing-unsafe secret comparisons, system-wide.** Every internal
+  service-to-service check (`x-service-secret`, `x-audit-secret`) compared
+  the header against the expected secret with plain `!==` across 9 call
+  sites in 7 services, instead of a constant-time comparison. This secret
+  is the only thing standing between an external caller and forging
+  arbitrary internal actions -- notably, `workflow-service`'s transition
+  endpoint trusts whatever `actorRole` the caller claims with no further
+  check, so holding this secret is enough to force-approve any application
+  directly. All 9 sites now use `crypto.timingSafeEqual`.
+
+Both fixes were verified against the running stack (a direct curl proving
+the webhook now rejects unauthenticated calls with 401) and the full test
+suite re-run clean (35/35) afterward.
+
+**Known gaps, not yet addressed:** refresh-token theft is detected (a
+rotated-out token is rejected) but doesn't trigger full token-family
+revocation the way a hardened implementation would; uploaded file MIME
+types are trusted from the client rather than verified against actual file
+content. Both are lower severity and documented as open items rather than
+silently left unmentioned.
 
 ## Backup and disaster recovery
 

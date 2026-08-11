@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { randomUUID } from "crypto";
+import { randomUUID, timingSafeEqual } from "crypto";
 import { db } from "../lib/db.js";
 import { requireAuth, requireRole } from "../middleware/requireAuth.js";
 import { recordAuditEvent } from "../lib/audit.js";
@@ -8,6 +8,18 @@ import { publishEvent } from "../lib/eventBus.js";
 import { MockMobileMoneyAdapter } from "../lib/providerAdapter.js";
 
 const router = Router();
+const SERVICE_SHARED_SECRET = process.env.SERVICE_SHARED_SECRET ?? "";
+
+function safeEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
+
+function isValidServiceSecret(req: { headers: Record<string, unknown> }): boolean {
+  const provided = req.headers["x-service-secret"];
+  return typeof provided === "string" && safeEquals(provided, SERVICE_SHARED_SECRET);
+}
 
 async function completePayment(referenceNumber: string, providerTransactionId: string) {
   const payment = await db.payment.findUnique({ where: { referenceNumber } });
@@ -91,11 +103,20 @@ router.post("/", requireAuth, async (req, res) => {
 
 /**
  * The endpoint a real Airtel Money / TNM Mpamba integration would call back
- * on payment completion. Exposed here so it can also be invoked manually
- * (e.g. via curl) to demo the flow without waiting for the mock timer.
+ * on payment completion. A real provider webhook is always authenticated
+ * (signature or shared secret) -- this one requires the same internal
+ * service secret every other trusted-caller endpoint in the platform does,
+ * both to mirror that reality and because without it, anyone who learns a
+ * referenceNumber (e.g. the citizen who just made the payment) could mark
+ * their own government fee "paid" without paying it. Still invokable
+ * manually via curl to demo the flow without waiting for the mock timer --
+ * just needs the header, same as any other internal call.
  */
 const webhookSchema = z.object({ referenceNumber: z.string(), providerTransactionId: z.string() });
 router.post("/webhook/mock-provider", async (req, res) => {
+  if (!isValidServiceSecret(req)) {
+    return res.status(401).json({ error: "unauthorized_service_call" });
+  }
   const parsed = webhookSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "validation_error" });
   await completePayment(parsed.data.referenceNumber, parsed.data.providerTransactionId);
@@ -139,11 +160,9 @@ router.get(
   }
 );
 
-const SERVICE_SHARED_SECRET = process.env.SERVICE_SHARED_SECRET ?? "";
-
 /** Internal: lets civil-registration-service check "has this application's fee been paid?" */
 router.get("/by-entity/lookup", async (req, res) => {
-  if (req.headers["x-service-secret"] !== SERVICE_SHARED_SECRET) {
+  if (!isValidServiceSecret(req)) {
     return res.status(401).json({ error: "unauthorized_service_call" });
   }
   const { entityType, entityId } = req.query;
