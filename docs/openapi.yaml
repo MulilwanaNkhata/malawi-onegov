@@ -1,0 +1,256 @@
+openapi: 3.0.3
+info:
+  title: Malawi OneGov — Pilot Public API (via API Gateway)
+  version: 0.1.0
+  description: >
+    Public surface exposed by the API gateway (http://localhost:4000/api) for
+    the Birth Certificate pilot. Every downstream service also independently
+    verifies auth on requests it receives, per the platform's defense-in-depth
+    principle. This spec covers the pilot's implemented endpoints only; the
+    full national platform would register one such contract per service in
+    the integration developer portal.
+servers:
+  - url: http://localhost:4000/api
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Application:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        referenceNumber: { type: string, example: BC-2026-4F2A9C1E }
+        childFullName: { type: string }
+        status:
+          type: string
+          enum: [SUBMITTED, UNDER_REVIEW, ADDITIONAL_INFO_REQUIRED, APPROVED, REJECTED, ISSUED]
+        feeAmount: { type: string, example: "2000" }
+        feeCurrency: { type: string, example: MWK }
+paths:
+  /auth/register:
+    post:
+      summary: Create a citizen account and enroll TOTP MFA
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fullName, phone, password]
+              properties:
+                fullName: { type: string }
+                phone: { type: string }
+                email: { type: string }
+                nationalId: { type: string }
+                password: { type: string, minLength: 8 }
+      responses:
+        "201":
+          description: Account created; MFA enrollment details returned once
+  /auth/login:
+    post:
+      summary: Step 1 of login -- verify password, receive a short-lived MFA ticket
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, password]
+              properties:
+                phone: { type: string }
+                password: { type: string }
+      responses:
+        "200": { description: MFA ticket issued }
+        "401": { description: Invalid credentials }
+  /auth/mfa/verify:
+    post:
+      summary: Step 2 of login -- verify TOTP code, receive access + refresh tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfaTicket, code]
+              properties:
+                mfaTicket: { type: string }
+                code: { type: string, minLength: 6, maxLength: 6 }
+      responses:
+        "200": { description: Tokens issued }
+  /auth/refresh:
+    post:
+      summary: Rotate a refresh token for a new access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties: { refreshToken: { type: string } }
+      responses:
+        "200": { description: New token pair issued }
+  /users/me:
+    get:
+      summary: Current authenticated user's profile
+      responses:
+        "200": { description: OK }
+  /applications/fee-schedule:
+    get:
+      summary: Published fee for the Birth Certificate service
+      security: []
+      responses:
+        "200": { description: OK }
+  /applications:
+    get:
+      summary: List applications (citizens see their own; staff see the review queue)
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Application" }
+    post:
+      summary: Submit a new Birth Certificate application (citizen only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [childFullName, dateOfBirth, placeOfBirth, sex, motherFullName]
+              properties:
+                childFullName: { type: string }
+                dateOfBirth: { type: string, format: date }
+                placeOfBirth: { type: string }
+                sex: { type: string, enum: [MALE, FEMALE] }
+                motherFullName: { type: string }
+                motherNationalId: { type: string }
+                fatherFullName: { type: string }
+                fatherNationalId: { type: string }
+      responses:
+        "201": { description: Application created with reference number }
+  /applications/{id}:
+    get:
+      summary: Application detail, including workflow status and payment status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Application" }
+  /applications/{id}/documents:
+    post:
+      summary: Register an uploaded supporting document against the application
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "201": { description: Document linked }
+  /applications/{id}/resubmit:
+    post:
+      summary: Citizen resubmits after ADDITIONAL_INFO_REQUIRED
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Transitioned back to UNDER_REVIEW }
+  /applications/{id}/review:
+    post:
+      summary: Staff review action (REGISTRAR_OFFICER / REGISTRAR_SUPERVISOR only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [REQUEST_MORE_INFO, APPROVE, REJECT] }
+                comment: { type: string }
+      responses:
+        "200": { description: New workflow status }
+  /applications/{id}/certificate:
+    get:
+      summary: Get a short-lived download URL for the issued certificate PDF
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Presigned download URL }
+        "409": { description: Certificate not yet issued }
+  /documents:
+    post:
+      summary: Upload a supporting document (multipart/form-data -- file, entityType, entityId, documentType)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+                entityType: { type: string }
+                entityId: { type: string }
+                documentType: { type: string }
+      responses:
+        "201": { description: Stored file id }
+  /payments:
+    post:
+      summary: Initiate a mobile money payment for an entity (e.g. an application)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entityType, entityId, amount, provider, phoneNumber]
+              properties:
+                entityType: { type: string }
+                entityId: { type: string }
+                amount: { type: number }
+                currency: { type: string, default: MWK }
+                provider: { type: string, enum: [AIRTEL_MONEY, TNM_MPAMBA, BANK_TRANSFER] }
+                phoneNumber: { type: string }
+      responses:
+        "201": { description: Payment initiated, PENDING }
+    get:
+      summary: List the current citizen's payment history
+      responses:
+        "200": { description: OK }
+  /notifications:
+    get:
+      summary: Current citizen's notification inbox
+      responses:
+        "200": { description: OK }

@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// One workflow instance per business entity (e.g. one per Birth Certificate
+/// application). Workflow *templates* (states/transitions/allowed roles) are
+/// defined in code (see src/templates.ts) rather than in the database --
+/// they are versioned platform configuration, not runtime data.
+model WorkflowInstance {
+  id           String   @id @default(uuid())
+  templateCode String
+  entityType   String
+  entityId     String
+  currentState String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  transitions WorkflowTransitionLog[]
+
+  @@unique([entityType, entityId])
+  @@index([templateCode, currentState])
+}
+
+model WorkflowTransitionLog {
+  id         String   @id @default(uuid())
+  instanceId String
+  instance   WorkflowInstance @relation(fields: [instanceId], references: [id])
+  fromState  String
+  toState    String
+  action     String
+  actorUserId String?
+  actorRole   String?
+  comment     String?
+  createdAt   DateTime @default(now())
+
+  @@index([instanceId])
+}

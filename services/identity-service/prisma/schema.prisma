@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CITIZEN
+  REGISTRAR_OFFICER
+  REGISTRAR_SUPERVISOR
+  SYSTEM_ADMIN
+}
+
+model User {
+  id           String   @id @default(uuid())
+  fullName     String
+  nationalId   String? // represents the NRB-issued national ID, verified out of band in production
+  phone        String   @unique
+  email        String?  @unique
+  passwordHash String
+  role         Role     @default(CITIZEN)
+
+  mfaSecret    String
+  mfaEnabled   Boolean  @default(true)
+
+  // Short numeric PIN for the USSD channel -- deliberately separate from the
+  // smartphone TOTP flow (feature phones can't run an authenticator app).
+  // Must be set from an authenticated smartphone/portal session first; there
+  // is no way to enroll a PIN over USSD itself.
+  ussdPinHash           String?
+  ussdPinSetAt          DateTime?
+  ussdPinFailedAttempts Int       @default(0)
+  ussdPinLockedUntil    DateTime?
+
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  refreshTokens RefreshToken[]
+
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  tokenHash String   @unique
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}

@@ -1,0 +1,264 @@
+# Malawi OneGov — Pilot Scaffold
+
+A working, runnable slice of the Malawi OneGov national digital government
+platform: two full citizen journeys (**apply for a Birth Certificate** and
+**apply for a Trading Licence** — both: apply → upload documents → pay the
+fee via mobile money → track status → get notified → download the digital
+certificate), built on the shared platform services every government service
+reuses (identity/MFA, API gateway, workflow engine, payments, notifications,
+document wallet, tamper-evident audit log, reporting).
+
+The second service exists specifically to prove the platform's core claim:
+onboarding a new government service is a new workflow template plus one new
+domain service, not a change to the shared engine. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for exactly what was reused
+unchanged vs. added new.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full component
+map and how it maps back to the platform brief, and
+[`docs/openapi.yaml`](docs/openapi.yaml) for the public API contract.
+
+> This repository is the **code scaffold** deliverable. It does not include
+> the long-form strategy document (executive summary, governance model,
+> procurement, staffing, cost categories, etc.) from the original brief --
+> ask if you'd like that written up separately.
+
+## What's implemented
+
+| Service | Port | Responsibility |
+| --- | --- | --- |
+| `api-gateway` | 4000 | Single public entry point, JWT-aware routing, rate limiting |
+| `identity-service` | 4001 | Registration, TOTP MFA, login, JWT/refresh, RBAC |
+| `audit-service` | 4002 | Hash-chained, tamper-evident audit log |
+| `workflow-service` | 4003 | Generic finite-state-machine engine |
+| `document-service` | 4004 | MinIO-backed document wallet + PDF certificate generation |
+| `payment-service` | 4005 | Mock mobile money adapter (Airtel Money / TNM Mpamba shaped) |
+| `notification-service` | 4006 | Event-driven SMS (mock) / email (MailHog) notifications |
+| `civil-registration-service` | 4007 | Birth Certificate domain logic, orchestrates the above |
+| `trading-license-service` | 4008 | Trading Licence domain logic -- the second pilot service, reusing everything above |
+| `ussd-gateway` | 4009 | Feature-phone access: check status by reference number, or apply for a Trading Licence, over USSD (PIN-authenticated) |
+| `citizen-portal` | 5173 | Mobile-first React SPA, English/Chichewa |
+
+Infrastructure: PostgreSQL (one database per service), Redis (event bus),
+MinIO (object storage), MailHog (catches outgoing dev email at
+http://localhost:8025).
+
+## Prerequisites
+
+- Docker Desktop (with Docker Compose)
+- Node.js 20+ only if you want to run the seed script or type-check outside Docker
+
+## Running it
+
+```bash
+cd malawi-onegov
+docker compose up --build
+```
+
+First boot pulls several images and installs npm dependencies inside each
+container, so it can take a few minutes. When it settles:
+
+- Citizen portal: http://localhost:5173
+- API gateway: http://localhost:4000/health/deep (aggregate health of every service)
+- MinIO console: http://localhost:9001 (login: `onegov` / `onegov-secret`)
+- MailHog (view "sent" emails): http://localhost:8025
+
+### Seed the two staff accounts
+
+The public registration endpoint only ever creates `CITIZEN` accounts (staff
+onboarding is meant to be an administrative act). Seed demo
+`REGISTRAR_OFFICER`, `REGISTRAR_SUPERVISOR`, and `SYSTEM_ADMIN` accounts once
+Postgres is up:
+
+```bash
+cd scripts
+npm install
+npm run seed:staff
+```
+
+This prints the shared demo password and TOTP secret for all three seeded
+accounts. Get a fresh 6-digit login code at any time with:
+
+```bash
+node generate-totp.mjs JBSWY3DPEHPK3PXP
+```
+
+(The same command works for any account's MFA secret, including a citizen
+account you register yourself through the portal -- the QR code shown at
+registration also encodes that secret if you'd rather scan it into Google
+Authenticator/Authy.)
+
+## Demo walkthrough
+
+1. Open http://localhost:5173, click **Register**, fill in the form.
+2. Note the MFA secret shown (or scan the QR code into an authenticator app).
+3. Log in with your phone/password, then the TOTP code (`node
+   scripts/generate-totp.mjs <secret>` if you didn't scan it). **Generate the
+   code right before you enter it** -- it expires in ~30-90 seconds.
+4. From the dashboard, apply for **either or both**: a Birth Certificate or a
+   Trading Licence -- both forms work the same way, note the reference number.
+5. On the application detail page, upload a supporting document and pay the
+   fee (pick Airtel Money or TNM Mpamba, enter any phone number). The mock
+   payment auto-confirms after ~3 seconds; refresh to see status move to
+   `UNDER_REVIEW`.
+6. Check **Notifications** -- you'll see the submission and payment
+   confirmation messages, and http://localhost:8025 will have the matching
+   emails if you registered with one.
+7. Log out, log back in as a seeded staff account (phone
+   `+265991000002`, the Registrar Supervisor). Open the relevant **review
+   queue**, open the application, and **Approve** it.
+8. The platform generates the certificate/licence PDF automatically, issues
+   it, and notifies the citizen. Log back in as the citizen and click
+   **Download certificate** on the application page.
+9. Open **Analytics** (staff nav) to see volume, processing time, and revenue
+   aggregated across both services.
+10. Check `GET /api/audit` (as the seeded `SYSTEM_ADMIN`, `+265991000000`) or
+    `http://localhost:4002/events/verify` to see the tamper-evident audit
+    trail for everything that just happened.
+
+## Try the USSD channel (feature-phone access, no app/portal needed)
+
+Every other service assumes a smartphone. This is the part of the pilot
+built specifically for citizens who don't have one: over a plain USSD
+session (no app, no internet), a citizen can check a Birth Certificate or
+Trading Licence's status by reference number, **or apply for a Trading
+Licence from scratch**.
+
+```bash
+node scripts/ussd-simulator.mjs
+```
+
+This drives the platform through `POST /ussd` on the gateway using the same
+webhook contract a real telco aggregator (e.g. Africa's Talking) speaks --
+every key press re-sends the full accumulated input, and the app responds
+`CON <text>` (show another screen) or `END <text>` (hang up).
+
+- **Options 1 and 2** check status by reference number -- try `BC-2026-...`
+  or `TL-2026-...` from an application you created above.
+- **Option 3** applies for a Trading Licence end to end over USSD. It needs
+  a **USSD PIN** first: log in to the portal, open **Profile**, and set a
+  4-6 digit PIN. That PIN -- not the smartphone TOTP code -- is what
+  authenticates the USSD session; it can only ever be set from an
+  authenticated portal session, never over USSD itself, so knowing someone's
+  phone number alone can't be used to enroll a PIN on their account. Five
+  wrong PIN attempts locks it for 15 minutes.
+
+## Running the tests
+
+```bash
+docker compose up -d   # stack must be running
+npm test
+```
+
+35 integration tests against the live stack (no mocking, no direct DB
+access) covering auth/MFA, both pilot services end to end, analytics, the
+audit hash-chain, and the USSD gateway -- including PIN enrollment, PIN
+lockout, and a full Trading Licence application submitted entirely over
+USSD. See `tests/README.md` for what's covered and, just as importantly,
+what isn't.
+
+**This suite already earned its keep once**: running it under real
+concurrent load caught a genuine race condition in `audit-service` -- the
+hash-chain write used `SELECT last row; compute next hash; INSERT`, which
+Postgres's default READ COMMITTED isolation does not serialize, so two
+concurrent audit writes (entirely normal traffic, not an edge case) could
+both read the same "last row" and fork the chain. Fixed with a
+`pg_advisory_xact_lock` around the critical section; re-verified by firing
+25 concurrent registrations at it and confirming the chain still checks out.
+Exactly the kind of bug an integration suite catches and a unit test can't.
+
+## Backup and disaster recovery
+
+A backup nobody has ever restored isn't a backup, it's a hope. Two scripts,
+same discipline as the test suite above -- don't just claim it works, prove it:
+
+```bash
+cd scripts
+npm run backup          # pg_dump every domain database + archive the MinIO volume
+npm run restore-drill   # prove the latest backup actually restores
+```
+
+`backup.mjs` takes a `pg_dump` of all 8 per-service databases (custom
+format) plus a tar of the MinIO object store's volume, into
+`backups/<timestamp>/` (gitignored -- these are real dumps of whatever data
+is in your stack, not something to commit).
+
+`restore-drill.mjs` is the part that actually matters: it spins up a
+disposable Postgres on a scratch Docker network, restores every dump into
+it, and confirms every table's row count matches the live database it came
+from -- then, specifically for `audit_db`, boots the real `audit-service`
+image against the restored data and re-runs its `/events/verify` hash-chain
+check, confirming the tamper-evident audit trail itself survives a
+disaster-recovery cycle intact, not just the raw bytes. Everything it
+creates is torn down at the end (success or failure); **it never stops,
+restarts, or writes to any live container, volume, or database** -- safe to
+run at any time against a running system.
+
+## Repository layout
+
+```
+malawi-onegov/
+  docker-compose.yml
+  infra/postgres-init/        # creates one database per service
+  libs/shared/                # reference copy of cross-service contracts (roles, events)
+  services/
+    api-gateway/
+    identity-service/
+    audit-service/
+    workflow-service/
+    document-service/
+    payment-service/
+    notification-service/
+    civil-registration-service/
+    trading-license-service/
+    ussd-gateway/
+  apps/
+    citizen-portal/
+  scripts/                    # seed-staff.mjs, generate-totp.mjs, ussd-simulator.mjs,
+                               # backup.mjs, restore-drill.mjs
+  tests/                      # integration test suite (npm test)
+  docs/
+    ARCHITECTURE.md
+    openapi.yaml
+```
+
+Each service under `services/` is independently deployable: its own
+`package.json`, own Prisma schema, own Dockerfile, own database. None of them
+import a shared npm package at runtime -- small pieces of shared knowledge
+(role names, event names) are intentionally duplicated in each service's
+`src/shared.ts` rather than centralized, so a service can be extracted,
+redeployed, or rewritten on its own without dragging the rest of the
+monorepo's build tooling with it.
+
+## Notes and known limitations (by design, for a pilot scaffold)
+
+- **Chichewa strings** in `apps/citizen-portal/src/i18n/translations.ts` are
+  a first pass, not professionally reviewed -- treat them as placeholders to
+  replace before any real localization sign-off.
+- **MFA** is real TOTP (not a stub), but there's no SMS-based fallback for
+  citizens without a smartphone -- production would need a USSD/SMS-based
+  second factor for feature-phone users, per the brief's low-bandwidth
+  requirements.
+- **USSD** (`ussd-gateway`) now covers status lookup *and* applying for a
+  Trading Licence end to end, authenticated by a PIN set from the portal
+  (see "Try the USSD channel" above) -- distinct from the smartphone TOTP
+  flow, since feature phones can't run an authenticator app. Not yet built:
+  a Birth Certificate application over USSD (more required fields makes the
+  screen-by-screen flow longer -- same pattern, just not repeated a second
+  time for this pilot), paying the fee over USSD (still portal-only), and a
+  self-service PIN reset without the portal (currently: set a new one from
+  the portal, which overwrites the old one).
+- **Payments and SMS are mocked** (see `docs/ARCHITECTURE.md` → "What
+  production would change") so the pilot runs without live telco/mobile
+  money credentials.
+- **Tests are integration-level only** (see `tests/`) -- they exercise the
+  live stack through the gateway like a real client would, which is exactly
+  what caught a real concurrency bug (below) that a unit test never would
+  have. There's no load/performance testing and no per-service contract
+  tests yet.
+- **Backups are manual** (`npm run backup` in `scripts/`, see "Backup and
+  disaster recovery" above) -- proven to actually restore via
+  `restore-drill.mjs`, but there's no scheduled/automatic backup job, and no
+  off-machine backup destination (dumps land in `backups/` on the same disk
+  as the database they're backing up, which protects against data
+  corruption or a bad migration but not a full disk failure).

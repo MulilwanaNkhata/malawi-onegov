@@ -1,0 +1,25 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model StoredFile {
+  id             String   @id @default(uuid())
+  ownerUserId    String
+  entityType     String
+  entityId       String
+  documentType   String // e.g. HOSPITAL_NOTIFICATION, PARENT_NATIONAL_ID, BIRTH_CERTIFICATE
+  originalName   String
+  mimeType       String
+  sizeBytes      Int
+  storageKey     String   @unique // object key inside the MinIO bucket
+  checksumSha256 String
+  createdAt      DateTime @default(now())
+
+  @@index([ownerUserId])
+  @@index([entityType, entityId])
+}

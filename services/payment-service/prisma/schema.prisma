@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PaymentProvider {
+  AIRTEL_MONEY
+  TNM_MPAMBA
+  BANK_TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model Payment {
+  id                  String          @id @default(uuid())
+  referenceNumber     String          @unique
+  entityType          String
+  entityId            String
+  payerUserId         String
+  amount              Decimal         @db.Decimal(12, 2)
+  currency             String         @default("MWK")
+  provider            PaymentProvider
+  phoneNumber         String
+  status              PaymentStatus   @default(PENDING)
+  providerTransactionId String?
+  createdAt           DateTime        @default(now())
+  completedAt         DateTime?
+
+  @@index([payerUserId])
+  @@index([entityType, entityId])
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@onegov/scripts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "seed:staff": "node seed-staff.mjs",
+    "totp": "node generate-totp.mjs",
+    "backup": "node backup.mjs",
+    "restore-drill": "node restore-drill.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "pg": "^8.13.0"
+  }
+}

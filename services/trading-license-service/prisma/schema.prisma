@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model TradingLicenseApplication {
+  id               String   @id @default(uuid())
+  referenceNumber  String   @unique
+  applicantUserId  String
+
+  businessName     String
+  businessType     String // RETAIL, RESTAURANT, SERVICES, MANUFACTURING, OTHER
+  tradingAddress   String
+  district         String
+  ownerFullName    String
+  ownerNationalId  String?
+
+  // Denormalized read-model copy of the authoritative workflow-service state,
+  // kept in sync via the application.status_changed event -- same pattern as
+  // civil-registration-service.
+  status           String   @default("SUBMITTED")
+
+  feeAmount        Decimal  @db.Decimal(12, 2)
+  feeCurrency      String   @default("MWK")
+
+  workflowInstanceId    String?
+  certificateDocumentId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documents LicenseDocument[]
+
+  @@index([applicantUserId])
+  @@index([status])
+}
+
+model LicenseDocument {
+  id                    String   @id @default(uuid())
+  applicationId         String
+  application           TradingLicenseApplication @relation(fields: [applicationId], references: [id])
+  documentType          String
+  documentServiceFileId String
+  uploadedAt            DateTime @default(now())
+
+  @@index([applicationId])
+}

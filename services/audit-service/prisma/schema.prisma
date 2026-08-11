@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Append-only, hash-chained audit log. Every sensitive administrative or
+/// citizen-security action across the platform lands here as a tamper-evident
+/// record: each row's hash commits to the previous row's hash plus its own
+/// payload, so any retroactive edit or deletion breaks the chain and is
+/// detectable via GET /events/verify.
+model AuditEvent {
+  sequence     BigInt   @id @default(autoincrement())
+  actorUserId  String?
+  actorRole    String?
+  action       String
+  resourceType String
+  resourceId   String
+  ipAddress    String?
+  userAgent    String?
+  metadata     Json?
+  prevHash     String
+  hash         String   @unique
+  createdAt    DateTime @default(now())
+
+  @@index([resourceType, resourceId])
+  @@index([actorUserId])
+  @@index([action])
+}

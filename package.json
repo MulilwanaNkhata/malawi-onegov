@@ -1,0 +1,19 @@
+{
+  "name": "malawi-onegov",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Malawi OneGov - integrated government digital services platform (pilot scaffold: Birth Certificate + Trading Licence journeys)",
+  "workspaces": [
+    "libs/*",
+    "services/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:up": "docker compose up --build",
+    "dev:down": "docker compose down -v",
+    "test": "node --test --test-concurrency=1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

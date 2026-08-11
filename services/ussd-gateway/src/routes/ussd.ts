@@ -1,0 +1,140 @@
+import { Router } from "express";
+import {
+  lookupBirthCertificate,
+  lookupTradingLicense,
+  verifyUssdPin,
+  submitTradingLicenseApplication,
+  type ApplicationStatus,
+} from "../lib/internalClients.js";
+
+const router = Router();
+
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  SUBMITTED: "received, awaiting fee payment",
+  UNDER_REVIEW: "under review",
+  ADDITIONAL_INFO_REQUIRED: "needs more information -- check the OneGov portal",
+  APPROVED: "approved, certificate being prepared",
+  REJECTED: "not approved",
+  ISSUED: "issued -- download it from the OneGov portal",
+};
+
+function describe(app: ApplicationStatus): string {
+  return STATUS_DESCRIPTIONS[app.status] ?? app.status;
+}
+
+const ROOT_MENU =
+  "CON Welcome to Malawi OneGov\n1. Check Birth Certificate status\n2. Check Trading Licence status\n3. Apply for a Trading Licence\n4. Help";
+
+const BUSINESS_TYPES = ["RETAIL", "RESTAURANT", "SERVICES", "MANUFACTURING", "OTHER"] as const;
+const BUSINESS_TYPE_MENU =
+  "CON Select the business type:\n1. Retail\n2. Restaurant\n3. Services\n4. Manufacturing\n5. Other";
+
+const PIN_ERROR_MESSAGES: Record<"invalid" | "locked" | "error", string> = {
+  invalid:
+    "END Incorrect phone number or PIN. If you haven't set a USSD PIN yet, log in to the OneGov portal and set one from your profile.",
+  locked: "END Too many incorrect PIN attempts. Please try again in 15 minutes, or reset your PIN from the OneGov portal.",
+  error: "END OneGov is temporarily unavailable. Please try again shortly.",
+};
+
+/**
+ * Implements the USSD aggregator webhook contract used by providers like
+ * Africa's Talking: on every key press, the aggregator POSTs the FULL
+ * accumulated input since the session started (segments separated by "*"),
+ * not just the latest key. That means this handler is deliberately
+ * stateless -- there is no server-side session store, no cleanup, nothing
+ * to leak. Every response is prefixed "CON " (show another screen, session
+ * continues) or "END " (final screen, session closes) exactly as the
+ * protocol requires.
+ *
+ * The apply-for-a-licence flow (option 3) re-verifies the phone+PIN against
+ * identity-service on every single step, not just once at entry. Because
+ * the design is stateless and the aggregator always resends the full text,
+ * that's the only way to avoid trusting an unauthenticated replay of a
+ * partial session -- and since a wrong PIN always ends the session
+ * immediately (see below), a later step can only ever be reached with the
+ * same PIN that already verified correctly, so the repeat checks are cheap
+ * and never double-penalize a citizen for one mistake.
+ */
+router.post("/", async (req, res) => {
+  const text = String(req.body.text ?? "").trim();
+  res.type("text/plain");
+
+  if (text === "") {
+    return res.send(ROOT_MENU);
+  }
+
+  const parts = text.split("*");
+
+  if (parts[0] === "1") {
+    if (parts.length === 1) return res.send("CON Enter your Birth Certificate reference number:");
+    if (parts.length === 2) {
+      const app = await lookupBirthCertificate(parts[1]);
+      if (!app) return res.send("END No Birth Certificate application found with that reference number.");
+      return res.send(`END ${app.referenceNumber}\n${app.label}\nStatus: ${describe(app)}`);
+    }
+  }
+
+  if (parts[0] === "2") {
+    if (parts.length === 1) return res.send("CON Enter your Trading Licence reference number:");
+    if (parts.length === 2) {
+      const app = await lookupTradingLicense(parts[1]);
+      if (!app) return res.send("END No Trading Licence application found with that reference number.");
+      return res.send(`END ${app.referenceNumber}\n${app.label}\nStatus: ${describe(app)}`);
+    }
+  }
+
+  if (parts[0] === "3") {
+    if (parts.length === 1) return res.send("CON Enter your phone number as registered on OneGov (e.g. +265991234567):");
+    if (parts.length === 2) return res.send("CON Enter your USSD PIN:");
+
+    // Every step from here on carries phone (parts[1]) and PIN (parts[2]) --
+    // re-check identity before doing anything else, every time.
+    const auth = await verifyUssdPin(parts[1], parts[2]);
+    if (!auth.ok) return res.send(PIN_ERROR_MESSAGES[auth.reason]);
+    if (auth.role !== "CITIZEN") return res.send("END This service is only available to citizen accounts.");
+
+    if (parts.length === 3) return res.send(BUSINESS_TYPE_MENU);
+
+    const typeChoice = Number(parts[3]);
+    if (!Number.isInteger(typeChoice) || typeChoice < 1 || typeChoice > BUSINESS_TYPES.length) {
+      return res.send("END Invalid selection. Please dial again and follow the menu.");
+    }
+    const businessType = BUSINESS_TYPES[typeChoice - 1];
+
+    if (parts.length === 4) return res.send("CON Enter your business name:");
+
+    const businessName = parts[4].trim();
+    if (parts.length === 5) return res.send("CON Enter your trading address:");
+
+    const tradingAddress = parts[5].trim();
+    if (parts.length === 6) return res.send("CON Enter your district (e.g. Lilongwe):");
+
+    const district = parts[6].trim();
+    if (parts.length === 7) return res.send("CON Enter the business owner's full name:");
+
+    const ownerFullName = parts[7].trim();
+    if (parts.length === 8) {
+      const result = await submitTradingLicenseApplication(auth.userId, {
+        businessName,
+        businessType,
+        tradingAddress,
+        district,
+        ownerFullName,
+      });
+      if (!result) {
+        return res.send("END Could not submit your application right now. Please try again shortly, or use the OneGov portal.");
+      }
+      return res.send(
+        `END Application submitted!\nReference: ${result.referenceNumber}\nYou'll be notified as it's processed. Check its status anytime from this menu (option 2).`
+      );
+    }
+  }
+
+  if (parts[0] === "4" && parts.length === 1) {
+    return res.send("END For help, call 199 (toll-free) or visit your nearest District Office.");
+  }
+
+  return res.send("END Invalid option. Please dial again and follow the menu.");
+});
+
+export default router;

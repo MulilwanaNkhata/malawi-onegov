@@ -1,0 +1,53 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model BirthCertificateApplication {
+  id                    String   @id @default(uuid())
+  referenceNumber       String   @unique
+  applicantUserId       String
+
+  childFullName         String
+  dateOfBirth           String
+  placeOfBirth          String
+  sex                   String
+  motherFullName        String
+  motherNationalId      String?
+  fatherFullName        String?
+  fatherNationalId      String?
+
+  // Denormalized read-model copy of the authoritative workflow-service state,
+  // kept in sync via the application.status_changed event. Queried heavily
+  // (list views, dashboards) so we avoid a network round-trip per read.
+  status                String   @default("SUBMITTED")
+
+  feeAmount             Decimal  @db.Decimal(12, 2)
+  feeCurrency           String   @default("MWK")
+
+  workflowInstanceId    String?
+  certificateDocumentId String?
+
+  createdAt             DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  documents ApplicationDocument[]
+
+  @@index([applicantUserId])
+  @@index([status])
+}
+
+model ApplicationDocument {
+  id                    String   @id @default(uuid())
+  applicationId         String
+  application           BirthCertificateApplication @relation(fields: [applicationId], references: [id])
+  documentType          String
+  documentServiceFileId String
+  uploadedAt            DateTime @default(now())
+
+  @@index([applicationId])
+}
