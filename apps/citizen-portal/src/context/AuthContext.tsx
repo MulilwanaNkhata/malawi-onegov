@@ -8,10 +8,12 @@ export interface CurrentUser {
   role: "CITIZEN" | "REGISTRAR_OFFICER" | "REGISTRAR_SUPERVISOR" | "SYSTEM_ADMIN";
 }
 
+type LoginPasswordResult = { mfaRequired: true; mfaTicket: string } | { mfaRequired: false };
+
 interface AuthContextValue {
   user: CurrentUser | null;
   loading: boolean;
-  loginPassword: (phone: string, password: string) => Promise<{ mfaTicket: string }>;
+  loginPassword: (phone: string, password: string) => Promise<LoginPasswordResult>;
   loginMfa: (mfaTicket: string, code: string) => Promise<void>;
   register: (input: {
     fullName: string;
@@ -51,9 +53,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function loginPassword(phone: string, password: string) {
+  async function loginPassword(phone: string, password: string): Promise<LoginPasswordResult> {
     const { data } = await api.post("/auth/login", { phone, password });
-    return { mfaTicket: data.mfaTicket };
+    if (data.mfaRequired === false) {
+      // Server has MFA_REQUIRED off (see identity-service) -- password alone
+      // was enough, tokens are already in this response.
+      setTokens(data.accessToken, data.refreshToken);
+      setUser(data.user);
+      return { mfaRequired: false };
+    }
+    return { mfaRequired: true, mfaTicket: data.mfaTicket };
   }
 
   async function loginMfa(mfaTicket: string, code: string) {

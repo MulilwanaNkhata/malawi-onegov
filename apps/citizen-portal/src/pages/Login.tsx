@@ -20,8 +20,12 @@ export default function Login() {
     setError(null);
     setBusy(true);
     try {
-      const { mfaTicket } = await loginPassword(phone, password);
-      setMfaTicket(mfaTicket);
+      const result = await loginPassword(phone, password);
+      if (result.mfaRequired) {
+        setMfaTicket(result.mfaTicket);
+      } else {
+        navigate("/");
+      }
     } catch {
       setError("Invalid phone number or password.");
     } finally {

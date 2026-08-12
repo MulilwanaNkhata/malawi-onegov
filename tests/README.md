@@ -20,7 +20,9 @@ dependency to install. Requires Node 20+.
 
 ## What's covered
 
-- `auth.test.mjs` -- registration, password+MFA login, wrong-password/
+- `auth.test.mjs` -- registration, password+MFA login, the direct-login path
+  used when `MFA_REQUIRED=false` (confirming the MFA subsystem underneath
+  stays fully intact and independently testable either way), wrong-password/
   wrong-code rejection, refresh token rotation, refresh-token reuse
   detection (a replayed rotated-out token revokes the whole token family,
   not just itself), RBAC boundary checks, and USSD PIN enrollment

@@ -78,25 +78,35 @@ npm install
 npm run seed:staff
 ```
 
-This prints the shared demo password and TOTP secret for all three seeded
-accounts. Get a fresh 6-digit login code at any time with:
+This prints the shared demo password for all three seeded accounts --
+that's all you need to log in with `MFA_REQUIRED=false` (the local default,
+see below). It also prints a TOTP secret, still enrolled and still usable if
+you turn MFA back on; get a fresh 6-digit code any time with:
 
 ```bash
 node generate-totp.mjs JBSWY3DPEHPK3PXP
 ```
 
-(The same command works for any account's MFA secret, including a citizen
-account you register yourself through the portal -- the QR code shown at
-registration also encodes that secret if you'd rather scan it into Google
-Authenticator/Authy.)
+**MFA is optional locally, on purpose.** `identity-service`'s
+`MFA_REQUIRED` env var defaults to `false` in `docker-compose.yml` --
+password alone logs you in. This isn't MFA removed, just not required at
+login: registration still enrolls a real TOTP secret and shows the QR code,
+and `/auth/mfa/verify` is fully intact and tested either way (relaying a
+30-second-lived code through a chat session during development was the
+actual friction, not MFA itself). Set `MFA_REQUIRED=true` in a root `.env`
+file (see `.env.example`) to require the second factor again -- no code
+changes needed.
 
 ## Demo walkthrough
 
 1. Open http://localhost:5173, click **Register**, fill in the form.
-2. Note the MFA secret shown (or scan the QR code into an authenticator app).
-3. Log in with your phone/password, then the TOTP code (`node
-   scripts/generate-totp.mjs <secret>` if you didn't scan it). **Generate the
-   code right before you enter it** -- it expires in ~30-90 seconds.
+2. Note the MFA secret shown (or scan the QR code into an authenticator
+   app) -- optional to actually use it right now, see above.
+3. Log in with your phone/password. With `MFA_REQUIRED=false` (the local
+   default) that's the whole flow; if you've turned it on, enter the TOTP
+   code too (`node scripts/generate-totp.mjs <secret>` if you didn't scan
+   it) -- **generate it right before you enter it**, it expires in ~30-90
+   seconds.
 4. From the dashboard, apply for **either or both**: a Birth Certificate or a
    Trading Licence -- both forms work the same way, note the reference number.
 5. On the application detail page, upload a supporting document and pay the
@@ -171,12 +181,13 @@ docker compose up -d   # stack must be running
 npm test
 ```
 
-44 integration tests against the live stack (no mocking, no direct DB
-access) covering auth/MFA, both pilot services end to end, analytics, the
-audit hash-chain, the USSD gateway (including PIN enrollment, PIN lockout,
-and a full Trading Licence application submitted entirely over USSD),
-document upload validation, and the developer portal. See `tests/README.md`
-for what's covered and, just as importantly, what isn't.
+45 integration tests against the live stack (no mocking, no direct DB
+access) covering auth/MFA (both the optional-at-login and full TOTP paths --
+see "Seed the two staff accounts" above), both pilot services end to end,
+analytics, the audit hash-chain, the USSD gateway (including PIN enrollment,
+PIN lockout, and a full Trading Licence application submitted entirely over
+USSD), document upload validation, and the developer portal. See
+`tests/README.md` for what's covered and, just as importantly, what isn't.
 
 **This suite already earned its keep once**: running it under real
 concurrent load caught a genuine race condition in `audit-service` -- the
@@ -319,7 +330,9 @@ monorepo's build tooling with it.
 - **MFA** is real TOTP (not a stub), but there's no SMS-based fallback for
   citizens without a smartphone -- production would need a USSD/SMS-based
   second factor for feature-phone users, per the brief's low-bandwidth
-  requirements.
+  requirements. It's also **not required at login by default locally**
+  (`MFA_REQUIRED=false` in `docker-compose.yml`) -- a real deployment should
+  set it back to `true`; see "Seed the two staff accounts" above.
 - **USSD** (`ussd-gateway`) now covers status lookup *and* applying for a
   Trading Licence end to end, authenticated by a PIN set from the portal
   (see "Try the USSD channel" above) -- distinct from the smartphone TOTP

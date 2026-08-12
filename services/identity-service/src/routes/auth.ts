@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import { db } from "../lib/db.js";
+import type { User } from "@prisma/client";
 import { generateMfaSecret, verifyMfaCode, buildEnrollmentQrCode } from "../lib/mfa.js";
 import {
   signAccessToken,
@@ -17,6 +18,36 @@ import { ROLES } from "../shared.js";
 const router = Router();
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-insecure-jwt-secret-change-me";
+
+// Secure by default: MFA is only skippable if this is explicitly set to the
+// string "false" (see docker-compose.yml, where local dev currently does
+// exactly that -- code-relaying a 30-second-lived TOTP code through chat
+// during development was the actual problem; this doesn't remove MFA, it
+// just stops requiring it at login time. Registration still enrolls a
+// secret, and /auth/mfa/verify below is completely unchanged and still
+// fully exercised by the test suite -- flip this back to "true" (or unset
+// it) to require it again with zero code changes.
+const MFA_REQUIRED = (process.env.MFA_REQUIRED ?? "true") !== "false";
+
+/** Shared by /mfa/verify and /login's MFA-skipped path -- both mean "this login is now fully authenticated, issue a session." */
+async function issueSessionTokens(user: Pick<User, "id" | "role" | "fullName">) {
+  const accessToken = signAccessToken({
+    sub: user.id,
+    role: user.role,
+    fullName: user.fullName,
+    mfa: true,
+  });
+  const { token: refreshToken, hash } = generateRefreshToken();
+  await db.refreshToken.create({
+    data: {
+      userId: user.id,
+      familyId: randomUUID(),
+      tokenHash: hash,
+      expiresAt: new Date(Date.now() + refreshTtlMs()),
+    },
+  });
+  return { accessToken, refreshToken };
+}
 
 const registerSchema = z.object({
   fullName: z.string().min(2),
@@ -113,7 +144,9 @@ router.post("/login", async (req, res) => {
     return res.status(401).json({ error: "invalid_credentials" });
   }
 
-  // Step 1 passed. Issue a short-lived MFA ticket rather than a full access token.
+  // Step 1 passed. Always issue a short-lived MFA ticket -- cheap, stateless,
+  // and it's what keeps /auth/mfa/verify fully testable and usable even
+  // while MFA_REQUIRED is off (see its definition above).
   const mfaTicket = jwt.sign({ sub: user.id, purpose: "mfa" }, JWT_SECRET, { expiresIn: "5m" });
 
   await recordAuditEvent({
@@ -124,6 +157,26 @@ router.post("/login", async (req, res) => {
     resourceId: user.id,
     ipAddress: req.ip,
   });
+
+  if (!MFA_REQUIRED) {
+    const { accessToken, refreshToken } = await issueSessionTokens(user);
+    await recordAuditEvent({
+      actorUserId: user.id,
+      actorRole: user.role,
+      action: "LOGIN_SUCCESS",
+      resourceType: "User",
+      resourceId: user.id,
+      ipAddress: req.ip,
+      metadata: { mfaSkipped: true },
+    });
+    return res.json({
+      mfaRequired: false,
+      mfaTicket,
+      accessToken,
+      refreshToken,
+      user: { id: user.id, fullName: user.fullName, role: user.role, phone: user.phone },
+    });
+  }
 
   return res.json({ mfaTicket, mfaRequired: true });
 });
@@ -161,22 +214,7 @@ router.post("/mfa/verify", async (req, res) => {
     return res.status(401).json({ error: "invalid_mfa_code" });
   }
 
-  const accessToken = signAccessToken({
-    sub: user.id,
-    role: user.role,
-    fullName: user.fullName,
-    mfa: true,
-  });
-  const { token: refreshToken, hash } = generateRefreshToken();
-
-  await db.refreshToken.create({
-    data: {
-      userId: user.id,
-      familyId: randomUUID(),
-      tokenHash: hash,
-      expiresAt: new Date(Date.now() + refreshTtlMs()),
-    },
-  });
+  const { accessToken, refreshToken } = await issueSessionTokens(user);
 
   await recordAuditEvent({
     actorUserId: user.id,

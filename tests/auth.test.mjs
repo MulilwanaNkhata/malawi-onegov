@@ -31,6 +31,30 @@ describe("identity: registration and MFA login", () => {
     assert.equal(me.role, "CITIZEN");
   });
 
+  test("with MFA_REQUIRED off, /auth/login returns a working session directly (no TOTP step needed)", async () => {
+    const { phone, password } = await registerCitizen("Direct Login Test User");
+    const loginRes = await apiOrThrow("POST", "/auth/login", { phone, password });
+
+    assert.equal(loginRes.mfaRequired, false);
+    assert.ok(loginRes.accessToken, "expected a usable access token straight from /auth/login");
+    assert.ok(loginRes.refreshToken);
+    assert.ok(loginRes.mfaTicket, "the MFA ticket should still be minted even though it isn't required -- /auth/mfa/verify must stay fully usable");
+
+    // Prove the directly-issued token is a real, working session, not a stub.
+    const me = await apiOrThrow("GET", "/users/me", undefined, loginRes.accessToken);
+    assert.equal(me.role, "CITIZEN");
+
+    // And prove the MFA subsystem underneath is untouched: the ticket this
+    // same login minted still works against /auth/mfa/verify on demand.
+    const citizen = await registerCitizen("Still Works Test User");
+    const stillWorksLogin = await apiOrThrow("POST", "/auth/login", { phone: citizen.phone, password: citizen.password });
+    const mfaResult = await apiOrThrow("POST", "/auth/mfa/verify", () => ({
+      mfaTicket: stillWorksLogin.mfaTicket,
+      code: totp(citizen.mfaEnrollment.secret),
+    }));
+    assert.ok(mfaResult.accessToken, "the full MFA verification path must still work even while login-time MFA is optional");
+  });
+
   test("wrong password is rejected before MFA is ever asked for", async () => {
     const { phone } = await registerCitizen("Bad Pw User");
     const { status, data } = await api("POST", "/auth/login", { phone, password: "WrongPassword!" });

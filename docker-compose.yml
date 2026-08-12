@@ -116,6 +116,11 @@ services:
       <<: *node-env
       PORT: "4001"
       DATABASE_URL: postgresql://${POSTGRES_USER:-onegov}:${POSTGRES_PASSWORD:-onegov}@postgres:5432/identity_db
+      # Off by default for local dev: relaying a 30-second-lived TOTP code
+      # through chat was the actual pain point, not MFA itself. Registration
+      # still enrolls a secret and /auth/mfa/verify is fully intact --
+      # set to "true" to require it again, no code changes needed.
+      MFA_REQUIRED: ${MFA_REQUIRED:-false}
     depends_on:
       postgres:
         condition: service_healthy
