@@ -1,14 +1,30 @@
 openapi: 3.0.3
 info:
   title: Malawi OneGov — Pilot Public API (via API Gateway)
-  version: 0.1.0
+  version: 0.2.0
   description: >
     Public surface exposed by the API gateway (http://localhost:4000/api) for
-    the Birth Certificate pilot. Every downstream service also independently
-    verifies auth on requests it receives, per the platform's defense-in-depth
-    principle. This spec covers the pilot's implemented endpoints only; the
-    full national platform would register one such contract per service in
-    the integration developer portal.
+    both pilot services -- Birth Certificate and Trading Licence -- plus the
+    shared platform capabilities (payments, documents, notifications, audit,
+    analytics) every government service reuses. Every downstream service also
+    independently verifies auth on requests it receives, per the platform's
+    defense-in-depth principle. Browse this interactively at
+    http://localhost:4000/docs once the stack is running.
+
+
+    Not included here: `workflow-service` (mounted at `/api/workflow` on the
+    gateway, but every route on it requires the internal service-to-service
+    secret, not a citizen/staff JWT -- it's only ever called by other
+    services on a user's behalf, never directly by an API consumer, so it
+    isn't part of the real public contract despite being reachable). The USSD
+    webhook (`/ussd`, not under `/api/`) is a different protocol entirely
+    (plain-text `CON`/`END` responses for a telco aggregator) and is
+    documented in the main README instead of here.
+
+
+    This spec covers the pilot's implemented endpoints only; the full
+    national platform would register one such contract per service in the
+    integration developer portal.
 servers:
   - url: http://localhost:4000/api
 security:
@@ -31,6 +47,50 @@ components:
           enum: [SUBMITTED, UNDER_REVIEW, ADDITIONAL_INFO_REQUIRED, APPROVED, REJECTED, ISSUED]
         feeAmount: { type: string, example: "2000" }
         feeCurrency: { type: string, example: MWK }
+    TradingLicenseApplication:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        referenceNumber: { type: string, example: TL-2026-99FE630C }
+        businessName: { type: string }
+        businessType:
+          type: string
+          enum: [RETAIL, RESTAURANT, SERVICES, MANUFACTURING, OTHER]
+        tradingAddress: { type: string }
+        district: { type: string }
+        ownerFullName: { type: string }
+        status:
+          type: string
+          enum: [SUBMITTED, UNDER_REVIEW, ADDITIONAL_INFO_REQUIRED, APPROVED, REJECTED, ISSUED]
+        feeAmount: { type: string, example: "15000" }
+        feeCurrency: { type: string, example: MWK }
+    ApplicationAnalytics:
+      type: object
+      description: Shape returned by both /applications/analytics and /trading-licenses/analytics -- staff-only.
+      properties:
+        totalApplications: { type: integer }
+        byStatus:
+          type: object
+          additionalProperties: { type: integer }
+          example: { SUBMITTED: 3, UNDER_REVIEW: 5, APPROVED: 12, ISSUED: 40 }
+        averageProcessingHours:
+          type: number
+          nullable: true
+          description: Null when no application has reached ISSUED yet.
+    PaymentAnalytics:
+      type: object
+      description: Staff-only revenue view.
+      properties:
+        totalCollected: { type: number }
+        totalTransactions: { type: integer }
+        currency: { type: string, example: MWK }
+        byProvider:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              count: { type: integer }
+              total: { type: number }
 paths:
   /auth/register:
     post:
@@ -104,6 +164,25 @@ paths:
       summary: Current authenticated user's profile
       responses:
         "200": { description: OK }
+  /users/me/ussd-pin:
+    post:
+      summary: Set (or replace) the 4-6 digit PIN used to authenticate on the USSD channel
+      description: >
+        Requires a real authenticated smartphone/portal session -- there is
+        no way to enroll or reset a USSD PIN over USSD itself, since that
+        would let anyone who knows a phone number take over USSD access.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin]
+              properties:
+                pin: { type: string, pattern: "^\\d{4,6}$" }
+      responses:
+        "204": { description: PIN set }
+        "400": { description: PIN is not 4-6 digits }
   /applications/fee-schedule:
     get:
       summary: Published fee for the Birth Certificate service
@@ -210,6 +289,132 @@ paths:
       responses:
         "200": { description: Presigned download URL }
         "409": { description: Certificate not yet issued }
+  /applications/analytics:
+    get:
+      summary: Volume, status breakdown, and average time-to-issue (staff only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicationAnalytics" }
+        "403": { description: Citizens cannot call this endpoint }
+
+  /trading-licenses/fee-schedule:
+    get:
+      summary: Published fee for the Trading Licence service
+      security: []
+      responses:
+        "200": { description: OK }
+  /trading-licenses:
+    get:
+      summary: List trading licence applications (citizens see their own; staff see the review queue)
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TradingLicenseApplication" }
+    post:
+      summary: Submit a new Trading Licence application (citizen only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessName, businessType, tradingAddress, district, ownerFullName]
+              properties:
+                businessName: { type: string }
+                businessType: { type: string, enum: [RETAIL, RESTAURANT, SERVICES, MANUFACTURING, OTHER] }
+                tradingAddress: { type: string }
+                district: { type: string }
+                ownerFullName: { type: string }
+                ownerNationalId: { type: string }
+      responses:
+        "201": { description: Application created with reference number }
+  /trading-licenses/{id}:
+    get:
+      summary: Application detail, including workflow status and payment status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TradingLicenseApplication" }
+  /trading-licenses/{id}/documents:
+    post:
+      summary: Register an uploaded supporting document against the application
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "201": { description: Document linked }
+  /trading-licenses/{id}/resubmit:
+    post:
+      summary: Citizen resubmits after ADDITIONAL_INFO_REQUIRED
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Transitioned back to UNDER_REVIEW }
+  /trading-licenses/{id}/review:
+    post:
+      summary: Staff review action (REGISTRAR_OFFICER / REGISTRAR_SUPERVISOR only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [REQUEST_MORE_INFO, APPROVE, REJECT] }
+                comment: { type: string }
+      responses:
+        "200": { description: New workflow status }
+  /trading-licenses/{id}/certificate:
+    get:
+      summary: Get a short-lived download URL for the issued licence PDF
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Presigned download URL }
+        "409": { description: Certificate not yet issued }
+  /trading-licenses/analytics:
+    get:
+      summary: Volume, status breakdown, and average time-to-issue (staff only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicationAnalytics" }
+        "403": { description: Citizens cannot call this endpoint }
+
   /documents:
     post:
       summary: Upload a supporting document (multipart/form-data -- file, entityType, entityId, documentType)
@@ -249,8 +454,55 @@ paths:
       summary: List the current citizen's payment history
       responses:
         "200": { description: OK }
+  /payments/analytics:
+    get:
+      summary: Revenue collected and volume by mobile money provider (staff only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentAnalytics" }
+        "403": { description: Citizens cannot call this endpoint }
   /notifications:
     get:
       summary: Current citizen's notification inbox
       responses:
         "200": { description: OK }
+  /audit:
+    get:
+      summary: Query the tamper-evident audit log (REGISTRAR_SUPERVISOR or SYSTEM_ADMIN only)
+      parameters:
+        - in: query
+          name: resourceType
+          schema: { type: string }
+        - in: query
+          name: resourceId
+          schema: { type: string }
+        - in: query
+          name: actorUserId
+          schema: { type: string }
+        - in: query
+          name: action
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, maximum: 500 }
+      responses:
+        "200": { description: OK }
+        "403": { description: Requires REGISTRAR_SUPERVISOR or SYSTEM_ADMIN }
+  /audit/verify:
+    get:
+      summary: Walk the full hash chain and confirm no record has been altered or removed (SYSTEM_ADMIN only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  checkedCount: { type: integer }
+                  brokenAtSequence: { type: integer, description: "Present only when valid is false" }
+        "403": { description: Requires SYSTEM_ADMIN }

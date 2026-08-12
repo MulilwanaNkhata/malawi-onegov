@@ -5,9 +5,14 @@ import helmet from "helmet";
 import morgan from "morgan";
 import axios from "axios";
 import rateLimit from "express-rate-limit";
+import path from "path";
+import { fileURLToPath } from "url";
 import { createProxyMiddleware } from "http-proxy-middleware";
+import swaggerUiDist from "swagger-ui-dist";
 import { correlationId } from "./middleware/correlationId.js";
 import { installProcessSafetyNets, errorHandler } from "./lib/errorHandling.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 installProcessSafetyNets("api-gateway");
 
@@ -153,6 +158,41 @@ app.get("/health/deep", async (_req, res) => {
   const allUp = results.every(([, status]) => status === "up");
   res.status(allUp ? 200 : 503).json({ status: allUp ? "ok" : "degraded", services });
 });
+
+// Developer portal: interactive API docs for the public contract, served
+// straight off the gateway rather than a separate site, since the gateway
+// *is* the public entry point. docs/openapi.yaml at the repo root is the
+// single source of truth (bind-mounted into this container -- see
+// docker-compose.yml); swagger-ui-dist ships Swagger UI's static assets
+// fully self-contained, no CDN or internet access needed at runtime.
+const OPENAPI_SPEC_PATH = process.env.OPENAPI_SPEC_PATH ?? path.join(__dirname, "../openapi.yaml");
+
+app.get("/docs/openapi.yaml", (_req, res) => res.sendFile(OPENAPI_SPEC_PATH));
+app.get("/docs", (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<html>
+<head>
+  <title>Malawi OneGov API</title>
+  <link rel="stylesheet" href="/docs/swagger-ui.css" />
+  <style>body { margin: 0; }</style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="/docs/swagger-ui-bundle.js"></script>
+  <script src="/docs/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = () => {
+      window.ui = SwaggerUIBundle({
+        url: "/docs/openapi.yaml",
+        dom_id: "#swagger-ui",
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+      });
+    };
+  </script>
+</body>
+</html>`);
+});
+app.use("/docs", express.static(swaggerUiDist.getAbsoluteFSPath()));
 
 app.use(errorHandler);
 

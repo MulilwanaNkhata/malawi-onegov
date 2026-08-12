@@ -272,6 +272,8 @@ services:
       CIVIL_REGISTRATION_SERVICE_URL: http://civil-registration-service:4007
       TRADING_LICENSE_SERVICE_URL: http://trading-license-service:4008
       USSD_GATEWAY_URL: http://ussd-gateway:4009
+    volumes:
+      - ./docs/openapi.yaml:/app/openapi.yaml:ro
     depends_on:
       - identity-service
       - civil-registration-service

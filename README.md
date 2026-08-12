@@ -16,7 +16,9 @@ unchanged vs. added new.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full component
 map and how it maps back to the platform brief, and
-[`docs/openapi.yaml`](docs/openapi.yaml) for the public API contract.
+[`docs/openapi.yaml`](docs/openapi.yaml) for the public API contract --
+browse it interactively at http://localhost:4000/docs once the stack is
+running (see "Developer portal" below).
 
 > This repository is the **code scaffold** deliverable. It does not include
 > the long-form strategy document (executive summary, governance model,
@@ -143,6 +145,25 @@ every key press re-sends the full accumulated input, and the app responds
   phone number alone can't be used to enroll a PIN on their account. Five
   wrong PIN attempts locks it for 15 minutes.
 
+## Developer portal
+
+http://localhost:4000/docs -- an interactive Swagger UI over the platform's
+real public contract, served directly off the gateway (the actual public
+entry point, rather than a separate docs site that can drift from it).
+Browse every endpoint, expand request/response shapes, and try requests
+against the live stack.
+
+[`docs/openapi.yaml`](docs/openapi.yaml) is the single source of truth --
+it's bind-mounted straight into the `api-gateway` container
+(`docker-compose.yml`), so the gateway and the file on disk can never
+disagree, and Swagger UI's assets ship self-contained via `swagger-ui-dist`
+(no CDN, works fully offline). The spec explicitly calls out what's
+*missing* from the public contract too: `workflow-service` is reachable at
+`/api/workflow` but every route on it requires the internal service secret,
+not a citizen/staff JWT, so it isn't really a public endpoint despite being
+proxied; and the USSD webhook (`/ussd`) is a different protocol entirely
+(plain-text, not JSON) and is documented above instead.
+
 ## Running the tests
 
 ```bash
@@ -150,12 +171,12 @@ docker compose up -d   # stack must be running
 npm test
 ```
 
-41 integration tests against the live stack (no mocking, no direct DB
+44 integration tests against the live stack (no mocking, no direct DB
 access) covering auth/MFA, both pilot services end to end, analytics, the
 audit hash-chain, the USSD gateway (including PIN enrollment, PIN lockout,
-and a full Trading Licence application submitted entirely over USSD), and
-document upload validation. See `tests/README.md` for what's covered and,
-just as importantly, what isn't.
+and a full Trading Licence application submitted entirely over USSD),
+document upload validation, and the developer portal. See `tests/README.md`
+for what's covered and, just as importantly, what isn't.
 
 **This suite already earned its keep once**: running it under real
 concurrent load caught a genuine race condition in `audit-service` -- the

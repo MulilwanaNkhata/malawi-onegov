@@ -28,6 +28,10 @@ dependency to install. Requires Node 20+.
 - `documents.test.mjs` -- upload content validation: real PDF/PNG magic
   bytes accepted, spoofed Content-Type rejected regardless of the declared
   MIME type, path-traversal-shaped entityType/entityId rejected
+- `docs-portal.test.mjs` -- the developer portal at `/docs` serves the real
+  Swagger UI page, the live `docs/openapi.yaml` (not a stale copy -- spot
+  checks routes that only exist because this spec was expanded this
+  session), and its self-hosted static assets
 - `birth-certificate.test.mjs` -- the full citizen+staff journey end to end,
   plus an ownership-isolation check and a role-boundary check on approval
 - `trading-license.test.mjs` -- the same, for the second pilot service, plus
