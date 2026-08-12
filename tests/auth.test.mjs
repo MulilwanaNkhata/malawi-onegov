@@ -68,6 +68,29 @@ describe("identity: registration and MFA login", () => {
     assert.equal(status, 401, "a rotated-out refresh token must not work a second time");
   });
 
+  test("reusing a rotated-out refresh token revokes the entire token family, not just that one request", async () => {
+    const { phone, password, mfaSecret } = await registerAndLoginCitizen("Reuse Detection Test User");
+    const { mfaTicket } = await apiOrThrow("POST", "/auth/login", { phone, password });
+    const { refreshToken: original } = await apiOrThrow("POST", "/auth/mfa/verify", () => ({
+      mfaTicket,
+      code: totp(mfaSecret),
+    }));
+
+    const rotated = await apiOrThrow("POST", "/auth/refresh", { refreshToken: original });
+    const currentToken = rotated.refreshToken;
+
+    // Replaying the already-rotated-out original token is the reuse signal
+    // (e.g. a stolen token used after the real client already moved past it).
+    const reuse = await api("POST", "/auth/refresh", { refreshToken: original });
+    assert.equal(reuse.status, 401);
+
+    // The token from the legitimate rotation above must now ALSO be dead,
+    // even though it was never itself replayed -- proving the whole family
+    // was revoked, not just the reused token rejected in isolation.
+    const { status } = await api("POST", "/auth/refresh", { refreshToken: currentToken });
+    assert.equal(status, 401, "the entire token family should be revoked once reuse of a rotated-out token is detected");
+  });
+
   test("a citizen cannot call a staff-only endpoint", async () => {
     const { accessToken } = await registerAndLoginCitizen("Non-staff User");
     const { status } = await api("GET", "/applications/analytics", undefined, accessToken);

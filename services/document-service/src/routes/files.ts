@@ -13,14 +13,44 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 
 const MAX_ALLOWED_MIME = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
+// The client-declared Content-Type on a multipart upload is just a header
+// the caller sends -- nothing stops it from lying (declare "image/png",
+// upload arbitrary bytes). Checking the file's actual magic bytes against
+// the declared type closes that gap; a mismatch is rejected before the
+// bytes ever reach storage.
+const MAGIC_BYTE_CHECKS: Record<string, (buf: Buffer) => boolean> = {
+  "application/pdf": (buf) => buf.subarray(0, 5).toString("latin1") === "%PDF-",
+  "image/jpeg": (buf) => buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff,
+  "image/png": (buf) =>
+    buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+};
+
+function matchesDeclaredType(mimetype: string, buffer: Buffer): boolean {
+  return MAGIC_BYTE_CHECKS[mimetype]?.(buffer) ?? false;
+}
+
+// Used to namespace object storage keys, not as an authorization boundary
+// (that's ownerUserId, checked separately below and on every read) -- but a
+// self-hosted, file-backed S3-compatible store can map object keys onto
+// real filesystem paths, so these are still worth restricting to a safe
+// charset as defense in depth against a crafted "../" segment.
+const safeSegment = /^[a-zA-Z0-9_-]+$/;
+
 router.post("/", requireAuth, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "file_required" });
   if (!MAX_ALLOWED_MIME.has(req.file.mimetype)) {
     return res.status(400).json({ error: "unsupported_file_type", allowed: [...MAX_ALLOWED_MIME] });
   }
+  if (!matchesDeclaredType(req.file.mimetype, req.file.buffer)) {
+    return res.status(400).json({ error: "file_content_does_not_match_declared_type" });
+  }
 
   const meta = z
-    .object({ entityType: z.string(), entityId: z.string(), documentType: z.string() })
+    .object({
+      entityType: z.string().regex(safeSegment),
+      entityId: z.string().regex(safeSegment),
+      documentType: z.string(),
+    })
     .safeParse(req.body);
   if (!meta.success) return res.status(400).json({ error: "validation_error" });
 

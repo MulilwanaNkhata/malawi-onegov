@@ -150,12 +150,12 @@ docker compose up -d   # stack must be running
 npm test
 ```
 
-35 integration tests against the live stack (no mocking, no direct DB
+41 integration tests against the live stack (no mocking, no direct DB
 access) covering auth/MFA, both pilot services end to end, analytics, the
-audit hash-chain, and the USSD gateway -- including PIN enrollment, PIN
-lockout, and a full Trading Licence application submitted entirely over
-USSD. See `tests/README.md` for what's covered and, just as importantly,
-what isn't.
+audit hash-chain, the USSD gateway (including PIN enrollment, PIN lockout,
+and a full Trading Licence application submitted entirely over USSD), and
+document upload validation. See `tests/README.md` for what's covered and,
+just as importantly, what isn't.
 
 **This suite already earned its keep once**: running it under real
 concurrent load caught a genuine race condition in `audit-service` -- the
@@ -208,12 +208,24 @@ Both fixes were verified against the running stack (a direct curl proving
 the webhook now rejects unauthenticated calls with 401) and the full test
 suite re-run clean (35/35) afterward.
 
-**Known gaps, not yet addressed:** refresh-token theft is detected (a
-rotated-out token is rejected) but doesn't trigger full token-family
-revocation the way a hardened implementation would; uploaded file MIME
-types are trusted from the client rather than verified against actual file
-content. Both are lower severity and documented as open items rather than
-silently left unmentioned.
+Two lower-severity findings from the same review are now fixed too:
+
+- **Refresh-token reuse now revokes the whole token family, not just the
+  replayed token.** Each login's refresh tokens share a `familyId`;
+  presenting an already-rotated-out token (the signal a real client
+  wouldn't produce, but a stolen-then-replayed token would) revokes every
+  token descended from that login, not just rejects that one request. A
+  test proves it: rotate once, replay the original, then confirm the
+  *legitimate* newer token -- never itself replayed -- is also dead.
+- **Uploaded file content is now checked against its declared type**, not
+  just trusted from the client-supplied Content-Type header. A file
+  claiming to be a PDF/JPEG/PNG is checked against the real magic bytes for
+  that format before it's stored; entityType/entityId are also now
+  restricted to a safe charset (defense in depth against a self-hosted,
+  file-backed object store mapping a crafted key onto a real filesystem
+  path).
+
+Both verified with new tests (6 more, 41/41 total) and a clean full suite run.
 
 ## Backup and disaster recovery
 

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "crypto";
 import { db } from "../lib/db.js";
 import { generateMfaSecret, verifyMfaCode, buildEnrollmentQrCode } from "../lib/mfa.js";
 import {
@@ -171,6 +172,7 @@ router.post("/mfa/verify", async (req, res) => {
   await db.refreshToken.create({
     data: {
       userId: user.id,
+      familyId: randomUUID(),
       tokenHash: hash,
       expiresAt: new Date(Date.now() + refreshTtlMs()),
     },
@@ -201,16 +203,45 @@ router.post("/refresh", async (req, res) => {
   const hash = hashRefreshToken(parsed.data.refreshToken);
   const stored = await db.refreshToken.findUnique({ where: { tokenHash: hash }, include: { user: true } });
 
-  if (!stored || stored.revoked || stored.expiresAt < new Date()) {
+  if (!stored) {
     return res.status(401).json({ error: "invalid_refresh_token" });
   }
 
-  // Rotate: revoke the old one, issue a new one.
+  if (stored.revoked) {
+    // This exact token was already consumed by a previous rotation. Seeing
+    // it again means either a stolen token being replayed after the real
+    // client already moved past it, or (rarer) a client-side retry race --
+    // either way the chain descended from this login can no longer be
+    // trusted, so the whole family is revoked, not just this one request
+    // rejected. A legitimate user just gets logged out and has to log back
+    // in; that's the correct tradeoff against a silently-persisting theft.
+    await db.refreshToken.updateMany({
+      where: { familyId: stored.familyId, revoked: false },
+      data: { revoked: true },
+    });
+    await recordAuditEvent({
+      actorUserId: stored.userId,
+      actorRole: stored.user.role,
+      action: "REFRESH_TOKEN_REUSE_DETECTED",
+      resourceType: "User",
+      resourceId: stored.userId,
+      ipAddress: req.ip,
+      metadata: { familyId: stored.familyId },
+    });
+    return res.status(401).json({ error: "invalid_refresh_token" });
+  }
+
+  if (stored.expiresAt < new Date()) {
+    return res.status(401).json({ error: "invalid_refresh_token" });
+  }
+
+  // Rotate: revoke the old one, issue a new one in the same family.
   await db.refreshToken.update({ where: { id: stored.id }, data: { revoked: true } });
   const { token: newRefreshToken, hash: newHash } = generateRefreshToken();
   await db.refreshToken.create({
     data: {
       userId: stored.userId,
+      familyId: stored.familyId,
       tokenHash: newHash,
       expiresAt: new Date(Date.now() + refreshTtlMs()),
     },

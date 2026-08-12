@@ -21,8 +21,13 @@ dependency to install. Requires Node 20+.
 ## What's covered
 
 - `auth.test.mjs` -- registration, password+MFA login, wrong-password/
-  wrong-code rejection, refresh token rotation, RBAC boundary checks, and
-  USSD PIN enrollment validation (format rules, requires a real session)
+  wrong-code rejection, refresh token rotation, refresh-token reuse
+  detection (a replayed rotated-out token revokes the whole token family,
+  not just itself), RBAC boundary checks, and USSD PIN enrollment
+  validation (format rules, requires a real session)
+- `documents.test.mjs` -- upload content validation: real PDF/PNG magic
+  bytes accepted, spoofed Content-Type rejected regardless of the declared
+  MIME type, path-traversal-shaped entityType/entityId rejected
 - `birth-certificate.test.mjs` -- the full citizen+staff journey end to end,
   plus an ownership-isolation check and a role-boundary check on approval
 - `trading-license.test.mjs` -- the same, for the second pilot service, plus

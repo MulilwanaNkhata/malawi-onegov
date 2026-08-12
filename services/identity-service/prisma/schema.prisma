@@ -49,9 +49,15 @@ model RefreshToken {
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   tokenHash String   @unique
+  // Shared by every token descended from one login via rotation. Presenting
+  // an already-revoked (rotated-out) token is treated as evidence the chain
+  // may be compromised, so the fix revokes every token in the family, not
+  // just the one presented -- see /auth/refresh.
+  familyId  String
   expiresAt DateTime
   revoked   Boolean  @default(false)
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@index([familyId])
 }
