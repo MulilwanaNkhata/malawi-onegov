@@ -17,6 +17,8 @@ import Profile from "./pages/Profile";
 import NewComplaint from "./pages/NewComplaint";
 import ComplaintDetail from "./pages/ComplaintDetail";
 import StaffComplaintQueue from "./pages/StaffComplaintQueue";
+import { InstallPrompt } from "./components/InstallPrompt";
+import { OfflineBanner } from "./components/OfflineBanner";
 
 export default function App() {
   const { user, logout, isStaff } = useAuth();
@@ -50,6 +52,9 @@ export default function App() {
           </nav>
         </div>
       </div>
+
+      <OfflineBanner />
+      <InstallPrompt />
 
       <Routes>
         <Route path="/login" element={<Login />} />

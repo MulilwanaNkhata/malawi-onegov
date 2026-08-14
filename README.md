@@ -44,7 +44,7 @@ running (see "Developer portal" below).
 | `trading-license-service` | 4008 | Trading Licence domain logic -- the second pilot service, reusing everything above |
 | `ussd-gateway` | 4009 | Feature-phone access: check status, apply, and pay the fee for a Trading Licence or Birth Certificate, over USSD (PIN-authenticated) |
 | `complaints-service` | 4010 | Complaints/support domain logic -- the third pilot service, and a genuinely different-shaped workflow (no fee, has a reopen loop) |
-| `citizen-portal` | 5173 | Mobile-first React SPA, English/Chichewa |
+| `citizen-portal` | 5173 | Mobile-first React SPA + installable PWA, English/Chichewa |
 
 Infrastructure: PostgreSQL (one database per service), Redis (event bus),
 MinIO (object storage), MailHog (catches outgoing dev email at
@@ -187,6 +187,40 @@ every key press re-sends the full accumulated input, and the app responds
   no partial payments), and it's rejected up front if the reference number
   isn't yours or the fee's already been paid, before it ever reaches the
   provider menu.
+
+## Install it as a mobile app
+
+`citizen-portal` is a real Progressive Web App, not just a responsive site
+-- most citizens will carry a smartphone rather than a feature phone, and
+this is what makes the same app installable to a home screen like a native
+one, launchable without a browser address bar, and able to open at all
+without a live connection.
+
+- **Android / Chrome / Edge**: open http://localhost:5173, and the app
+  itself shows an **Install app** banner (triggered by the browser's own
+  `beforeinstallprompt` event) -- tap it, no app store involved. If you
+  dismiss it, the browser's own menu (⋮ → "Install app" / "Add to Home
+  Screen") still works.
+- **iOS Safari**: iOS never fires that install event -- there's no
+  programmatic install, only **Share → Add to Home Screen**. The app
+  detects it's running on iOS and shows that instruction directly instead
+  of a button that wouldn't do anything there.
+- **Offline**: the app shell (everything except live data) is precached by
+  a service worker (`vite-plugin-pwa` + Workbox) at build time, so the app
+  still *opens* with no network at all. It does not, and should not, cache
+  API responses -- a stale cached "fee unpaid" for an application that was
+  actually just approved would be actively misleading for a government
+  service, so anything that needs live data (applications, payments,
+  notifications) still needs a connection, same as before. An offline
+  banner appears automatically (`navigator.onLine`) so that's obvious
+  rather than surfacing as a confusing failed request.
+- The container now serves a real production build (`vite build` +
+  `vite preview`) instead of the dev server, specifically so the service
+  worker precaches the actual built app shell rather than only proving
+  registration works -- see `apps/citizen-portal/Dockerfile`.
+- Service workers require HTTPS in real deployments (`localhost` is
+  exempted for exactly this kind of local testing) -- see "What production
+  would change" in `docs/ARCHITECTURE.md`.
 
 ## Developer portal
 
@@ -381,6 +415,12 @@ monorepo's build tooling with it.
 - **Payments and SMS are mocked** (see `docs/ARCHITECTURE.md` → "What
   production would change") so the pilot runs without live telco/mobile
   money credentials.
+- **The PWA install/offline story covers the app shell, not push
+  notifications** -- the service worker precaches static assets so the app
+  opens with no network and is installable on Android/iOS home screens (see
+  "Install it as a mobile app" above), but there's no Web Push subscription
+  or server-side push trigger yet; notifications today are still SMS/email
+  only, delivered when the citizen next opens the app.
 - **Tests are integration-level only** (see `tests/`) -- they exercise the
   live stack through the gateway like a real client would, which is exactly
   what caught a real concurrency bug (below) that a unit test never would

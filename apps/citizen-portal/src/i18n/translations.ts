@@ -133,6 +133,11 @@ export const translations: Record<Lang, Record<string, string>> = {
     recentActivity: "Recent activity",
     noRecentActivity: "Nothing submitted yet.",
     viewFullAnalytics: "View full analytics",
+    installApp: "Install app",
+    dismiss: "Not now",
+    installHintAndroid: "Install Malawi OneGov on your phone for quick access, even offline.",
+    installHintIos: 'Add Malawi OneGov to your Home Screen: tap Share, then "Add to Home Screen".',
+    offlineBanner: "You're offline. Some features won't work until you're back online.",
   },
   ny: {
     appName: "Malawi OneGov",
@@ -266,5 +271,10 @@ export const translations: Record<Lang, Record<string, string>> = {
     recentActivity: "Zochitika posachedwa",
     noRecentActivity: "Palibe chotumizidwa pakadali pano.",
     viewFullAnalytics: "Onani ziwerengero zonse",
+    installApp: "Ikani app",
+    dismiss: "Osati tsopano",
+    installHintAndroid: "Ikani Malawi OneGov pa foni yanu kuti muzitha kuyifikira mwachangu, ngakhale popanda intaneti.",
+    installHintIos: 'Onjezerani Malawi OneGov pa Home Screen yanu: dinani Share, kenako "Add to Home Screen".',
+    offlineBanner: "Simuli pa intaneti. Zina mwazinthu sizingagwire ntchito mpaka mutalumikizananso.",
   },
 };

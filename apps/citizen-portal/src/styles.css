@@ -446,3 +446,30 @@ footer {
   white-space: nowrap;
   text-decoration: none;
 }
+
+.offline-banner {
+  background: #fbe9c8;
+  color: var(--color-warning);
+  text-align: center;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.install-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: rgba(10, 104, 71, 0.08);
+  border-bottom: 1px solid var(--color-border);
+  padding: 10px 16px;
+  font-size: 0.85rem;
+}
+
+.install-banner-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
