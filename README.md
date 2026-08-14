@@ -42,7 +42,7 @@ running (see "Developer portal" below).
 | `notification-service` | 4006 | Event-driven SMS (mock) / email (MailHog) notifications |
 | `civil-registration-service` | 4007 | Birth Certificate domain logic, orchestrates the above |
 | `trading-license-service` | 4008 | Trading Licence domain logic -- the second pilot service, reusing everything above |
-| `ussd-gateway` | 4009 | Feature-phone access: check status by reference number, or apply for a Trading Licence, over USSD (PIN-authenticated) |
+| `ussd-gateway` | 4009 | Feature-phone access: check status by reference number, or apply for a Trading Licence or Birth Certificate, over USSD (PIN-authenticated) |
 | `complaints-service` | 4010 | Complaints/support domain logic -- the third pilot service, and a genuinely different-shaped workflow (no fee, has a reopen loop) |
 | `citizen-portal` | 5173 | Mobile-first React SPA, English/Chichewa |
 
@@ -147,7 +147,7 @@ Every other service assumes a smartphone. This is the part of the pilot
 built specifically for citizens who don't have one: over a plain USSD
 session (no app, no internet), a citizen can check a Birth Certificate or
 Trading Licence's status by reference number, **or apply for a Trading
-Licence from scratch**.
+Licence or a Birth Certificate from scratch**.
 
 ```bash
 node scripts/ussd-simulator.mjs
@@ -160,13 +160,18 @@ every key press re-sends the full accumulated input, and the app responds
 
 - **Options 1 and 2** check status by reference number -- try `BC-2026-...`
   or `TL-2026-...` from an application you created above.
-- **Option 3** applies for a Trading Licence end to end over USSD. It needs
-  a **USSD PIN** first: log in to the portal, open **Profile**, and set a
-  4-6 digit PIN. That PIN -- not the smartphone TOTP code -- is what
-  authenticates the USSD session; it can only ever be set from an
-  authenticated portal session, never over USSD itself, so knowing someone's
-  phone number alone can't be used to enroll a PIN on their account. Five
-  wrong PIN attempts locks it for 15 minutes.
+- **Options 3 and 4** apply for a Trading Licence or a Birth Certificate end
+  to end over USSD. Both need a **USSD PIN** first: log in to the portal,
+  open **Profile**, and set a 4-6 digit PIN. That PIN -- not the smartphone
+  TOTP code -- is what authenticates the USSD session; it can only ever be
+  set from an authenticated portal session, never over USSD itself, so
+  knowing someone's phone number alone can't be used to enroll a PIN on
+  their account. Five wrong PIN attempts locks it for 15 minutes. The Birth
+  Certificate flow enters the date of birth as 8 digits, `DDMMYYYY` (no
+  separators a keypad can't type), converted server-side to the same ISO
+  date the portal's date picker already stores; the mother's/father's
+  National ID and the father's details themselves are all optional, entered
+  as `0` to skip.
 
 ## Developer portal
 
@@ -194,12 +199,12 @@ docker compose up -d   # stack must be running
 npm test
 ```
 
-50 integration tests against the live stack (no mocking, no direct DB
+56 integration tests against the live stack (no mocking, no direct DB
 access) covering auth/MFA (both the optional-at-login and full TOTP paths --
 see "Seed the two staff accounts" above), all three pilot services end to
 end (including the complaints reopen loop), analytics, the audit hash-chain,
-the USSD gateway (including PIN enrollment, PIN lockout, and a full Trading
-Licence application submitted entirely over USSD), document upload
+the USSD gateway (including PIN enrollment, PIN lockout, and full Trading
+Licence and Birth Certificate applications submitted entirely over USSD), document upload
 validation, and the developer portal. See `tests/README.md` for what's
 covered and, just as importantly, what isn't.
 
@@ -350,15 +355,13 @@ monorepo's build tooling with it.
   requirements. It's also **not required at login by default locally**
   (`MFA_REQUIRED=false` in `docker-compose.yml`) -- a real deployment should
   set it back to `true`; see "Seed the two staff accounts" above.
-- **USSD** (`ussd-gateway`) now covers status lookup *and* applying for a
-  Trading Licence end to end, authenticated by a PIN set from the portal
-  (see "Try the USSD channel" above) -- distinct from the smartphone TOTP
-  flow, since feature phones can't run an authenticator app. Not yet built:
-  a Birth Certificate application over USSD (more required fields makes the
-  screen-by-screen flow longer -- same pattern, just not repeated a second
-  time for this pilot), paying the fee over USSD (still portal-only), and a
-  self-service PIN reset without the portal (currently: set a new one from
-  the portal, which overwrites the old one).
+- **USSD** (`ussd-gateway`) now covers status lookup *and* applying for
+  either a Trading Licence or a Birth Certificate end to end, authenticated
+  by a PIN set from the portal (see "Try the USSD channel" above) --
+  distinct from the smartphone TOTP flow, since feature phones can't run an
+  authenticator app. Not yet built: paying the fee over USSD (still
+  portal-only), and a self-service PIN reset without the portal (currently:
+  set a new one from the portal, which overwrites the old one).
 - **Payments and SMS are mocked** (see `docs/ARCHITECTURE.md` → "What
   production would change") so the pilot runs without live telco/mobile
   money credentials.

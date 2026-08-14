@@ -35,17 +35,15 @@ const createSchema = z.object({
   fatherNationalId: z.string().optional(),
 });
 
-router.post("/", requireAuth, requireRole("CITIZEN"), async (req, res) => {
-  const parsed = createSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "validation_error", details: parsed.error.flatten() });
-
+/** Shared by the citizen-facing POST / below and the internal apply-on-behalf endpoint (USSD channel). */
+async function createBirthCertificateApplication(applicantUserId: string, data: z.infer<typeof createSchema>) {
   const referenceNumber = `BC-${new Date().getFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
 
   const application = await db.birthCertificateApplication.create({
     data: {
-      ...parsed.data,
+      ...data,
       referenceNumber,
-      applicantUserId: req.user!.sub,
+      applicantUserId,
       status: "SUBMITTED",
       feeAmount: FEE_AMOUNT,
       feeCurrency: FEE_CURRENCY,
@@ -58,27 +56,68 @@ router.post("/", requireAuth, requireRole("CITIZEN"), async (req, res) => {
     data: { workflowInstanceId: workflowInstance.id },
   });
 
+  return application;
+}
+
+async function recordSubmissionAuditAndEvent(
+  application: Awaited<ReturnType<typeof createBirthCertificateApplication>>,
+  applicantUserId: string,
+  actorRole: string,
+  channel: "portal" | "ussd"
+) {
   await recordAuditEvent({
-    actorUserId: req.user!.sub,
-    actorRole: req.user!.role,
+    actorUserId: applicantUserId,
+    actorRole,
     action: "BIRTH_CERTIFICATE_APPLICATION_SUBMITTED",
     resourceType: "BirthCertificateApplication",
     resourceId: application.id,
-    metadata: { referenceNumber },
+    metadata: { referenceNumber: application.referenceNumber, channel },
   });
 
   await publishEvent("application.submitted", {
     applicationId: application.id,
-    applicantUserId: req.user!.sub,
-    referenceNumber,
+    applicantUserId,
+    referenceNumber: application.referenceNumber,
     childFullName: application.childFullName,
     entityType: "birth_certificate",
     label: application.childFullName,
   });
+}
+
+router.post("/", requireAuth, requireRole("CITIZEN"), async (req, res) => {
+  const parsed = createSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "validation_error", details: parsed.error.flatten() });
+
+  const application = await createBirthCertificateApplication(req.user!.sub, parsed.data);
+  await recordSubmissionAuditAndEvent(application, req.user!.sub, req.user!.role, "portal");
 
   return res.status(201).json({
     id: application.id,
-    referenceNumber,
+    referenceNumber: application.referenceNumber,
+    status: application.status,
+    feeAmount: FEE_AMOUNT,
+    feeCurrency: FEE_CURRENCY,
+  });
+});
+
+const applyOnBehalfSchema = createSchema.extend({ applicantUserId: z.string().uuid() });
+
+/**
+ * Internal only: lets a trusted channel service (currently ussd-gateway)
+ * submit an application on a citizen's behalf after authenticating them
+ * itself (PIN, not a JWT -- feature phones can't hold a session token).
+ */
+router.post("/internal/apply-on-behalf", requireService, async (req, res) => {
+  const parsed = applyOnBehalfSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "validation_error", details: parsed.error.flatten() });
+
+  const { applicantUserId, ...data } = parsed.data;
+  const application = await createBirthCertificateApplication(applicantUserId, data);
+  await recordSubmissionAuditAndEvent(application, applicantUserId, "CITIZEN", "ussd");
+
+  return res.status(201).json({
+    id: application.id,
+    referenceNumber: application.referenceNumber,
     status: application.status,
     feeAmount: FEE_AMOUNT,
     feeCurrency: FEE_CURRENCY,

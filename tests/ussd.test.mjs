@@ -27,6 +27,7 @@ describe("USSD gateway (feature-phone access)", () => {
     assert.match(response, /Check Birth Certificate status/);
     assert.match(response, /Check Trading Licence status/);
     assert.match(response, /Apply for a Trading Licence/);
+    assert.match(response, /Apply for a Birth Certificate/);
   });
 
   test("option 1 prompts for a Birth Certificate reference number", async () => {
@@ -84,7 +85,7 @@ describe("USSD gateway (feature-phone access)", () => {
   });
 
   test("the help option ends the session with contact information", async () => {
-    const response = await dial({ sessionId: "t-help", text: "4" });
+    const response = await dial({ sessionId: "t-help", text: "5" });
     assert.match(response, /^END /);
     assert.match(response, /199/);
   });
@@ -172,5 +173,131 @@ describe("USSD gateway: PIN-authenticated Trading Licence application (option 3)
     const lockedAttempt = await dial({ sessionId: "t-lock-final", text: `3*${citizen.phone}*9999` });
     assert.match(lockedAttempt, /^END /);
     assert.match(lockedAttempt, /too many incorrect pin attempts/i);
+  });
+});
+
+describe("USSD gateway: PIN-authenticated Birth Certificate application (option 4)", () => {
+  test("a citizen who has never set a USSD PIN is rejected, not crashed", async () => {
+    const citizen = await registerAndLoginCitizen("BC No PIN Yet");
+    const response = await dial({ sessionId: "t-bc-nopin", text: `4*${citizen.phone}*1234` });
+    assert.match(response, /^END /);
+    assert.match(response, /incorrect phone number or pin/i);
+  });
+
+  test("setting a USSD PIN from the portal, then applying for a Birth Certificate entirely over USSD, skipping the optional father details", async () => {
+    const citizen = await registerAndLoginCitizen("BC USSD Applicant");
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "2468" }, citizen.accessToken);
+
+    const wrongPin = await dial({ sessionId: "t-bc-apply-wrong", text: `4*${citizen.phone}*0000` });
+    assert.match(wrongPin, /^END /, "a wrong PIN must end the session, not let the caller keep guessing mid-session");
+    assert.match(wrongPin, /incorrect phone number or pin/i);
+
+    const dobPrompt = await dial({ sessionId: "t-bc-apply", text: `4*${citizen.phone}*2468*USSD Test Baby` });
+    assert.match(dobPrompt, /^CON /);
+    assert.match(dobPrompt, /date of birth/i);
+
+    const sexMenu = await dial({
+      sessionId: "t-bc-apply",
+      text: `4*${citizen.phone}*2468*USSD Test Baby*15012026*Karonga District Hospital`,
+    });
+    assert.match(sexMenu, /^CON /);
+    assert.match(sexMenu, /select the child's sex/i);
+
+    const final = await dial({
+      sessionId: "t-bc-apply",
+      text: `4*${citizen.phone}*2468*USSD Test Baby*15012026*Karonga District Hospital*2*USSD Test Mother*0*0*0`,
+    });
+    assert.match(final, /^END /);
+    assert.match(final, /application submitted/i);
+    const refMatch = final.match(/Reference: (\S+)/);
+    assert.ok(refMatch, `expected a reference number in: ${final}`);
+
+    const created = await waitUntil(async () => {
+      const applications = await apiOrThrow("GET", "/applications", undefined, citizen.accessToken);
+      return applications.find((a) => a.referenceNumber === refMatch[1]);
+    });
+    assert.ok(created, "the USSD-submitted application should show up in the citizen's own portal list");
+    assert.equal(created.childFullName, "USSD Test Baby");
+    assert.equal(created.dateOfBirth, "2026-01-15", "DDMMYYYY 15012026 must convert to ISO 2026-01-15");
+    assert.equal(created.placeOfBirth, "Karonga District Hospital");
+    assert.equal(created.sex, "FEMALE", "option 2 in the sex menu must map to FEMALE");
+    assert.equal(created.motherFullName, "USSD Test Mother");
+    assert.equal(created.motherNationalId, null, "entering 0 must skip the optional mother's National ID");
+    assert.equal(created.fatherFullName, null, "entering 0 must skip the optional father's full name");
+    assert.equal(created.fatherNationalId, null, "entering 0 must skip the optional father's National ID");
+    assert.equal(created.applicantUserId, citizen.userId, "the application must be owned by the PIN-authenticated citizen");
+
+    const statusCheck = await dial({ sessionId: "t-bc-status", text: `1*${refMatch[1]}` });
+    assert.match(statusCheck, /^END /);
+    assert.ok(statusCheck.includes("USSD Test Baby"));
+  });
+
+  test("providing the optional father details carries them through instead of nulling them out", async () => {
+    const citizen = await registerAndLoginCitizen("BC USSD Father Applicant");
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "1122" }, citizen.accessToken);
+
+    const final = await dial({
+      sessionId: "t-bc-apply-father",
+      text: `4*${citizen.phone}*1122*Full Details Baby*01062026*Mzuzu Central Hospital*1*Full Details Mother*ID-M-1*Full Details Father*ID-F-1`,
+    });
+    assert.match(final, /^END /);
+    const refMatch = final.match(/Reference: (\S+)/);
+    assert.ok(refMatch);
+
+    const created = await waitUntil(async () => {
+      const applications = await apiOrThrow("GET", "/applications", undefined, citizen.accessToken);
+      return applications.find((a) => a.referenceNumber === refMatch[1]);
+    });
+    assert.equal(created.sex, "MALE", "option 1 in the sex menu must map to MALE");
+    assert.equal(created.motherNationalId, "ID-M-1");
+    assert.equal(created.fatherFullName, "Full Details Father");
+    assert.equal(created.fatherNationalId, "ID-F-1");
+  });
+
+  test("an invalid date of birth ends the session cleanly instead of reaching the database", async () => {
+    const citizen = await registerAndLoginCitizen("BC Bad Date Applicant");
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "3344" }, citizen.accessToken);
+
+    const notEightDigits = await dial({
+      sessionId: "t-bc-baddate-1",
+      text: `4*${citizen.phone}*3344*Bad Date Baby*3120`,
+    });
+    assert.match(notEightDigits, /^END /);
+    assert.match(notEightDigits, /invalid date of birth/i);
+
+    const notARealDate = await dial({
+      sessionId: "t-bc-baddate-2",
+      text: `4*${citizen.phone}*3344*Bad Date Baby*31022026`,
+    });
+    assert.match(notARealDate, /^END /);
+    assert.match(notARealDate, /invalid date of birth/i);
+
+    const futureDate = await dial({
+      sessionId: "t-bc-baddate-3",
+      text: `4*${citizen.phone}*3344*Bad Date Baby*01012099`,
+    });
+    assert.match(futureDate, /^END /);
+    assert.match(futureDate, /invalid date of birth/i);
+  });
+
+  test("an invalid sex-menu digit ends the session cleanly", async () => {
+    const citizen = await registerAndLoginCitizen("BC Bad Sex Applicant");
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "5566" }, citizen.accessToken);
+
+    const response = await dial({
+      sessionId: "t-bc-badsex",
+      text: `4*${citizen.phone}*5566*Bad Sex Baby*15012026*Blantyre*9`,
+    });
+    assert.match(response, /^END /);
+    assert.match(response, /invalid selection/i);
+  });
+
+  test("only a citizen account may apply for a Birth Certificate over USSD, even with a valid PIN", async () => {
+    const supervisorToken = await loginAsSupervisor();
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "7788" }, supervisorToken);
+
+    const response = await dial({ sessionId: "t-bc-staff-apply", text: `4*${SEEDED_SUPERVISOR_PHONE}*7788` });
+    assert.match(response, /^END /);
+    assert.match(response, /only available to citizen accounts/i);
   });
 });

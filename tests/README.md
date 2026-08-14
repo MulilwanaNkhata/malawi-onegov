@@ -46,11 +46,15 @@ dependency to install. Requires Node 20+.
 - `analytics-and-audit.test.mjs` -- analytics shape/aggregation correctness,
   audit hash-chain integrity, and that both are staff-only
 - `ussd.test.mjs` -- the USSD menu tree against a real running application,
-  using the same webhook contract a telco aggregator would, including the
-  PIN-authenticated Trading Licence application flow: no-PIN-yet rejection,
-  wrong PIN, a full application submitted end to end over USSD (and
-  confirmed to show up correctly in the citizen's own portal view), invalid
-  menu input, the CITIZEN-only role check, and 5-wrong-attempts lockout
+  using the same webhook contract a telco aggregator would, including both
+  PIN-authenticated application flows (Trading Licence and Birth
+  Certificate): no-PIN-yet rejection, wrong PIN, a full application
+  submitted end to end over USSD (and confirmed to show up correctly in the
+  citizen's own portal view, with the DDMMYYYY date correctly converted to
+  ISO), the Birth Certificate flow's optional fields both skipped (`0`) and
+  provided, invalid date-of-birth and invalid sex-menu input, invalid menu
+  input generally, the CITIZEN-only role check on both flows, and
+  5-wrong-attempts lockout
 
 ## What this does *not* cover (known gaps)
 

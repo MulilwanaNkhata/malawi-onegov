@@ -4,6 +4,7 @@ import {
   lookupTradingLicense,
   verifyUssdPin,
   submitTradingLicenseApplication,
+  submitBirthCertificateApplication,
   type ApplicationStatus,
 } from "../lib/internalClients.js";
 
@@ -23,11 +24,34 @@ function describe(app: ApplicationStatus): string {
 }
 
 const ROOT_MENU =
-  "CON Welcome to Malawi OneGov\n1. Check Birth Certificate status\n2. Check Trading Licence status\n3. Apply for a Trading Licence\n4. Help";
+  "CON Welcome to Malawi OneGov\n1. Check Birth Certificate status\n2. Check Trading Licence status\n3. Apply for a Trading Licence\n4. Apply for a Birth Certificate\n5. Help";
 
 const BUSINESS_TYPES = ["RETAIL", "RESTAURANT", "SERVICES", "MANUFACTURING", "OTHER"] as const;
 const BUSINESS_TYPE_MENU =
   "CON Select the business type:\n1. Retail\n2. Restaurant\n3. Services\n4. Manufacturing\n5. Other";
+
+const CHILD_SEX_MENU = "CON Select the child's sex:\n1. Male\n2. Female";
+
+/**
+ * Parses an 8-digit DDMMYYYY entry (the only format a feature-phone keypad
+ * can enter without separators) into the ISO "YYYY-MM-DD" string every
+ * other channel (the portal's <input type="date">) already stores. Rejects
+ * anything that isn't a real calendar date, and any date in the future.
+ */
+function parseUssdDateOfBirth(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!/^\d{8}$/.test(trimmed)) return null;
+
+  const day = Number(trimmed.slice(0, 2));
+  const month = Number(trimmed.slice(2, 4));
+  const year = Number(trimmed.slice(4, 8));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const isRealCalendarDate =
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  if (!isRealCalendarDate || date.getTime() > Date.now()) return null;
+
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
 
 const PIN_ERROR_MESSAGES: Record<"invalid" | "locked" | "error", string> = {
   invalid:
@@ -46,8 +70,9 @@ const PIN_ERROR_MESSAGES: Record<"invalid" | "locked" | "error", string> = {
  * continues) or "END " (final screen, session closes) exactly as the
  * protocol requires.
  *
- * The apply-for-a-licence flow (option 3) re-verifies the phone+PIN against
- * identity-service on every single step, not just once at entry. Because
+ * The apply-for-a-licence flow (option 3) and apply-for-a-birth-certificate
+ * flow (option 4) both re-verify the phone+PIN against identity-service on
+ * every single step, not just once at entry. Because
  * the design is stateless and the aggregator always resends the full text,
  * that's the only way to avoid trusting an unauthenticated replay of a
  * partial session -- and since a wrong PIN always ends the session
@@ -130,7 +155,73 @@ router.post("/", async (req, res) => {
     }
   }
 
-  if (parts[0] === "4" && parts.length === 1) {
+  if (parts[0] === "4") {
+    if (parts.length === 1) return res.send("CON Enter your phone number as registered on OneGov (e.g. +265991234567):");
+    if (parts.length === 2) return res.send("CON Enter your USSD PIN:");
+
+    // Same re-verify-every-step design as option 3 above -- see the doc
+    // comment on this handler for why that's safe and cheap here.
+    const auth = await verifyUssdPin(parts[1], parts[2]);
+    if (!auth.ok) return res.send(PIN_ERROR_MESSAGES[auth.reason]);
+    if (auth.role !== "CITIZEN") return res.send("END This service is only available to citizen accounts.");
+
+    if (parts.length === 3) return res.send("CON Enter the child's full name:");
+
+    const childFullName = parts[3].trim();
+    if (parts.length === 4) {
+      return res.send("CON Enter the child's date of birth as DDMMYYYY (e.g. 15012026 for 15 Jan 2026):");
+    }
+
+    const dateOfBirth = parseUssdDateOfBirth(parts[4]);
+    if (!dateOfBirth) {
+      return res.send("END Invalid date of birth. Please dial again and enter it as DDMMYYYY, e.g. 15012026.");
+    }
+    if (parts.length === 5) return res.send("CON Enter the place of birth (e.g. district or hospital):");
+
+    const placeOfBirth = parts[5].trim();
+    if (parts.length === 6) return res.send(CHILD_SEX_MENU);
+
+    const sexChoice = parts[6];
+    if (sexChoice !== "1" && sexChoice !== "2") {
+      return res.send("END Invalid selection. Please dial again and follow the menu.");
+    }
+    const sex = sexChoice === "1" ? "MALE" : "FEMALE";
+    if (parts.length === 7) return res.send("CON Enter the mother's full name:");
+
+    const motherFullName = parts[7].trim();
+    if (parts.length === 8) return res.send("CON Enter the mother's National ID number, or 0 if not available:");
+
+    const motherNationalIdRaw = parts[8].trim();
+    const motherNationalId = motherNationalIdRaw === "0" ? undefined : motherNationalIdRaw;
+    if (parts.length === 9) return res.send("CON Enter the father's full name, or 0 if not available:");
+
+    const fatherFullNameRaw = parts[9].trim();
+    const fatherFullName = fatherFullNameRaw === "0" ? undefined : fatherFullNameRaw;
+    if (parts.length === 10) return res.send("CON Enter the father's National ID number, or 0 if not available:");
+
+    const fatherNationalIdRaw = parts[10].trim();
+    const fatherNationalId = fatherNationalIdRaw === "0" ? undefined : fatherNationalIdRaw;
+    if (parts.length === 11) {
+      const result = await submitBirthCertificateApplication(auth.userId, {
+        childFullName,
+        dateOfBirth,
+        placeOfBirth,
+        sex,
+        motherFullName,
+        motherNationalId,
+        fatherFullName,
+        fatherNationalId,
+      });
+      if (!result) {
+        return res.send("END Could not submit your application right now. Please try again shortly, or use the OneGov portal.");
+      }
+      return res.send(
+        `END Application submitted!\nReference: ${result.referenceNumber}\nYou'll be notified as it's processed. Check its status anytime from this menu (option 1).`
+      );
+    }
+  }
+
+  if (parts[0] === "5" && parts.length === 1) {
     return res.send("END For help, call 199 (toll-free) or visit your nearest District Office.");
   }
 

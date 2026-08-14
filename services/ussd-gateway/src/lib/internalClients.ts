@@ -77,3 +77,31 @@ export async function submitTradingLicenseApplication(
     return null;
   }
 }
+
+export interface UssdBirthCertificateInput {
+  childFullName: string;
+  dateOfBirth: string;
+  placeOfBirth: string;
+  sex: "MALE" | "FEMALE";
+  motherFullName: string;
+  motherNationalId?: string;
+  fatherFullName?: string;
+  fatherNationalId?: string;
+}
+
+/** Submits a Birth Certificate application on the citizen's behalf, having already authenticated them via PIN. */
+export async function submitBirthCertificateApplication(
+  applicantUserId: string,
+  input: UssdBirthCertificateInput
+): Promise<{ referenceNumber: string } | null> {
+  try {
+    const { data } = await axios.post(
+      `${CIVIL_REGISTRATION_SERVICE_URL}/applications/internal/apply-on-behalf`,
+      { applicantUserId, ...input },
+      { headers: { "x-service-secret": SERVICE_SHARED_SECRET }, timeout: 4000 }
+    );
+    return data;
+  } catch {
+    return null;
+  }
+}
