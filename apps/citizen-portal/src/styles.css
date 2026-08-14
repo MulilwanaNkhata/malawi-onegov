@@ -314,3 +314,135 @@ footer {
   min-width: 2.5em;
   text-align: right;
 }
+
+/* Staff dashboard -- staff work at a desk more often than citizens filing a
+   single application, so this is the one part of the portal that opts into
+   a wider layout instead of the mobile-first 720px container everywhere else. */
+.container-wide {
+  max-width: 1080px;
+}
+
+.staff-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.role-badge {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: rgba(10, 104, 71, 0.12);
+  color: var(--color-primary);
+}
+
+.stat-tile-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: rgba(10, 104, 71, 0.1);
+  color: var(--color-primary);
+  margin-bottom: 8px;
+}
+
+.stat-tile-alert {
+  border-left: 3px solid var(--color-warning);
+}
+
+.stat-tile-alert .stat-tile-icon {
+  background: rgba(138, 97, 0, 0.14);
+  color: var(--color-warning);
+}
+
+.queue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.queue-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  text-decoration: none;
+  color: var(--color-text);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.queue-card:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 14px rgba(10, 104, 71, 0.12);
+  transform: translateY(-1px);
+}
+
+.queue-card-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius);
+  background: rgba(10, 104, 71, 0.1);
+  color: var(--color-primary);
+}
+
+.queue-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.queue-card-body h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.queue-card-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.82rem;
+  color: var(--color-muted);
+}
+
+.queue-card-alert {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+.activity-item-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.activity-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--color-bg);
+  color: var(--color-muted);
+  flex-shrink: 0;
+}
+
+.link-arrow {
+  font-size: 0.85rem;
+  white-space: nowrap;
+  text-decoration: none;
+}

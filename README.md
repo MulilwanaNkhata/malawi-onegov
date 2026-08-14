@@ -124,13 +124,20 @@ changes needed.
    confirmation messages, and http://localhost:8025 will have the matching
    emails if you registered with one.
 7. Log out, log back in as a seeded staff account (phone
-   `+265991000002`, the Registrar Supervisor). Open the relevant **review
-   queue**, open the application, and **Approve** it.
+   `+265991000002`, the Registrar Supervisor). Staff land on a different
+   home page from citizens -- a dashboard showing what's actually awaiting
+   action right now (counts per service, not just a list of buttons) plus a
+   combined recent-activity feed across all three services. Open the
+   relevant **review queue** from there, open the application, and
+   **Approve** it.
 8. The platform generates the certificate/licence PDF automatically, issues
    it, and notifies the citizen. Log back in as the citizen and click
    **Download certificate** on the application page.
-9. Open **Analytics** (staff nav) to see volume, processing time, and revenue
-   aggregated across all three services.
+9. Open **Analytics** (staff nav, or "View full analytics" from the staff
+   dashboard) for the full historical breakdown -- volume, processing time,
+   and revenue aggregated across all three services. The staff dashboard
+   itself only surfaces the operational subset (what's pending right now),
+   deliberately kept separate from this full reporting view.
 10. Check `GET /api/audit` (as the seeded `SYSTEM_ADMIN`, `+265991000000`) or
     `http://localhost:4002/events/verify` to see the tamper-evident audit
     trail for everything that just happened.
