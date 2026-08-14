@@ -187,6 +187,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-onegov}:${POSTGRES_PASSWORD:-onegov}@postgres:5432/notification_db
       CIVIL_REGISTRATION_SERVICE_URL: http://civil-registration-service:4007
       TRADING_LICENSE_SERVICE_URL: http://trading-license-service:4008
+      COMPLAINTS_SERVICE_URL: http://complaints-service:4010
     depends_on:
       postgres:
         condition: service_healthy
@@ -242,6 +243,23 @@ services:
       - "4008:4008"
     networks: [onegov-net]
 
+  complaints-service:
+    build:
+      context: ./services/complaints-service
+    environment:
+      <<: *node-env
+      PORT: "4010"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-onegov}:${POSTGRES_PASSWORD:-onegov}@postgres:5432/complaints_db
+      WORKFLOW_SERVICE_URL: http://workflow-service:4003
+    depends_on:
+      postgres:
+        condition: service_healthy
+      workflow-service:
+        condition: service_started
+    ports:
+      - "4010:4010"
+    networks: [onegov-net]
+
   ussd-gateway:
     build:
       context: ./services/ussd-gateway
@@ -277,6 +295,7 @@ services:
       CIVIL_REGISTRATION_SERVICE_URL: http://civil-registration-service:4007
       TRADING_LICENSE_SERVICE_URL: http://trading-license-service:4008
       USSD_GATEWAY_URL: http://ussd-gateway:4009
+      COMPLAINTS_SERVICE_URL: http://complaints-service:4010
     volumes:
       - ./docs/openapi.yaml:/app/openapi.yaml:ro
     depends_on:
@@ -285,6 +304,7 @@ services:
       - notification-service
       - trading-license-service
       - ussd-gateway
+      - complaints-service
     ports:
       - "4000:4000"
     networks: [onegov-net]

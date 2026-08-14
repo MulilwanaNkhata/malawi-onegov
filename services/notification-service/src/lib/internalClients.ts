@@ -6,6 +6,7 @@ const CIVIL_REGISTRATION_SERVICE_URL =
   process.env.CIVIL_REGISTRATION_SERVICE_URL ?? "http://civil-registration-service:4007";
 const TRADING_LICENSE_SERVICE_URL =
   process.env.TRADING_LICENSE_SERVICE_URL ?? "http://trading-license-service:4008";
+const COMPLAINTS_SERVICE_URL = process.env.COMPLAINTS_SERVICE_URL ?? "http://complaints-service:4010";
 
 export interface UserContact {
   id: string;
@@ -46,6 +47,7 @@ export interface ApplicationSummary {
 const RESOLVERS: Record<string, (entityId: string) => string> = {
   birth_certificate: (id) => `${CIVIL_REGISTRATION_SERVICE_URL}/applications/internal/${id}`,
   trading_license: (id) => `${TRADING_LICENSE_SERVICE_URL}/licenses/internal/${id}`,
+  complaint: (id) => `${COMPLAINTS_SERVICE_URL}/complaints/internal/${id}`,
 };
 
 export async function resolveApplication(entityType: string, entityId: string): Promise<ApplicationSummary | null> {

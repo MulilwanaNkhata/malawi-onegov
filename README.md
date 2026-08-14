@@ -1,18 +1,22 @@
 # Malawi OneGov — Pilot Scaffold
 
 A working, runnable slice of the Malawi OneGov national digital government
-platform: two full citizen journeys (**apply for a Birth Certificate** and
-**apply for a Trading Licence** — both: apply → upload documents → pay the
+platform: three full citizen journeys -- **apply for a Birth Certificate**,
+**apply for a Trading Licence** (both: apply → upload documents → pay the
 fee via mobile money → track status → get notified → download the digital
-certificate), built on the shared platform services every government service
-reuses (identity/MFA, API gateway, workflow engine, payments, notifications,
-document wallet, tamper-evident audit log, reporting).
+certificate), and **file a complaint** -- built on the shared platform
+services every government service reuses (identity/MFA, API gateway,
+workflow engine, payments, notifications, document wallet, tamper-evident
+audit log, reporting).
 
-The second service exists specifically to prove the platform's core claim:
-onboarding a new government service is a new workflow template plus one new
-domain service, not a change to the shared engine. See
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for exactly what was reused
-unchanged vs. added new.
+The second and third services exist specifically to prove the platform's
+core claim: onboarding a new government service is a new workflow template
+plus one new domain service, not a change to the shared engine. Complaints
+in particular is a deliberately *different-shaped* process from the other
+two (no fee, no approve/reject branch, and a real reopen loop) -- proof the
+engine generalizes to something other than a structurally-identical clone.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for exactly what was
+reused unchanged vs. added new.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full component
 map and how it maps back to the platform brief, and
@@ -39,6 +43,7 @@ running (see "Developer portal" below).
 | `civil-registration-service` | 4007 | Birth Certificate domain logic, orchestrates the above |
 | `trading-license-service` | 4008 | Trading Licence domain logic -- the second pilot service, reusing everything above |
 | `ussd-gateway` | 4009 | Feature-phone access: check status by reference number, or apply for a Trading Licence, over USSD (PIN-authenticated) |
+| `complaints-service` | 4010 | Complaints/support domain logic -- the third pilot service, and a genuinely different-shaped workflow (no fee, has a reopen loop) |
 | `citizen-portal` | 5173 | Mobile-first React SPA, English/Chichewa |
 
 Infrastructure: PostgreSQL (one database per service), Redis (event bus),
@@ -107,8 +112,10 @@ changes needed.
    code too (`node scripts/generate-totp.mjs <secret>` if you didn't scan
    it) -- **generate it right before you enter it**, it expires in ~30-90
    seconds.
-4. From the dashboard, apply for **either or both**: a Birth Certificate or a
-   Trading Licence -- both forms work the same way, note the reference number.
+4. From the dashboard, apply for **any or all**: a Birth Certificate, a
+   Trading Licence -- both forms work the same way, note the reference
+   number -- or **file a complaint** (no fee, no form of its own to fill in
+   twice; see step 11).
 5. On the application detail page, upload a supporting document and pay the
    fee (pick Airtel Money or TNM Mpamba, enter any phone number). The mock
    payment auto-confirms after ~3 seconds; refresh to see status move to
@@ -123,10 +130,16 @@ changes needed.
    it, and notifies the citizen. Log back in as the citizen and click
    **Download certificate** on the application page.
 9. Open **Analytics** (staff nav) to see volume, processing time, and revenue
-   aggregated across both services.
+   aggregated across all three services.
 10. Check `GET /api/audit` (as the seeded `SYSTEM_ADMIN`, `+265991000000`) or
     `http://localhost:4002/events/verify` to see the tamper-evident audit
     trail for everything that just happened.
+11. File a complaint from the dashboard, then as staff **assign** it,
+    **resolve** it with a message, and -- back as the citizen -- **reopen**
+    it if unsatisfied, or close it. This loop (RESOLVED/CLOSED back to
+    IN_PROGRESS) doesn't exist on the other two services; it's the clearest
+    place to see the workflow engine handling a genuinely different shape
+    of process, not just another apply-and-issue clone.
 
 ## Try the USSD channel (feature-phone access, no app/portal needed)
 
@@ -181,13 +194,14 @@ docker compose up -d   # stack must be running
 npm test
 ```
 
-45 integration tests against the live stack (no mocking, no direct DB
+50 integration tests against the live stack (no mocking, no direct DB
 access) covering auth/MFA (both the optional-at-login and full TOTP paths --
-see "Seed the two staff accounts" above), both pilot services end to end,
-analytics, the audit hash-chain, the USSD gateway (including PIN enrollment,
-PIN lockout, and a full Trading Licence application submitted entirely over
-USSD), document upload validation, and the developer portal. See
-`tests/README.md` for what's covered and, just as importantly, what isn't.
+see "Seed the two staff accounts" above), all three pilot services end to
+end (including the complaints reopen loop), analytics, the audit hash-chain,
+the USSD gateway (including PIN enrollment, PIN lockout, and a full Trading
+Licence application submitted entirely over USSD), document upload
+validation, and the developer portal. See `tests/README.md` for what's
+covered and, just as importantly, what isn't.
 
 **This suite already earned its keep once**: running it under real
 concurrent load caught a genuine race condition in `audit-service` -- the
@@ -270,8 +284,10 @@ npm run backup          # pg_dump every domain database + archive the MinIO volu
 npm run restore-drill   # prove the latest backup actually restores
 ```
 
-`backup.mjs` takes a `pg_dump` of all 8 per-service databases (custom
-format) plus a tar of the MinIO object store's volume, into
+`backup.mjs` takes a `pg_dump` of all 9 per-service databases (custom
+format, read from `infra/postgres-init/init-multiple-dbs.sh` so it can never
+drift out of sync with what's actually deployed) plus a tar of the MinIO
+object store's volume, into
 `backups/<timestamp>/` (gitignored -- these are real dumps of whatever data
 is in your stack, not something to commit).
 
@@ -304,6 +320,7 @@ malawi-onegov/
     civil-registration-service/
     trading-license-service/
     ussd-gateway/
+    complaints-service/
   apps/
     citizen-portal/
   scripts/                    # seed-staff.mjs, generate-totp.mjs, ussd-simulator.mjs,

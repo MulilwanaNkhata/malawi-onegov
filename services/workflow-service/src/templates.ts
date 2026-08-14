@@ -105,9 +105,32 @@ export const TRADING_LICENSE_TEMPLATE: WorkflowTemplate = {
   ],
 };
 
+/**
+ * Complaints/support -- the third pilot service, and a deliberately
+ * different-shaped process from the two above: no payment step, no
+ * approve/reject branch, and CITIZEN holds transitions of their own
+ * (CLOSE, REOPEN) rather than only ever submitting and resubmitting. It
+ * also has a genuine cycle (RESOLVED/CLOSED -> IN_PROGRESS via REOPEN),
+ * which the apply-and-issue shape never needed. Proves the engine generalizes
+ * to a real support-ticket lifecycle, not just structurally-identical clones.
+ */
+export const COMPLAINT_TEMPLATE: WorkflowTemplate = {
+  code: "complaint",
+  initialState: "OPEN",
+  states: ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"],
+  transitions: [
+    { action: "ASSIGN", from: "OPEN", to: "IN_PROGRESS", allowedRoles: ["REGISTRAR_OFFICER", "REGISTRAR_SUPERVISOR"] },
+    { action: "RESOLVE", from: "IN_PROGRESS", to: "RESOLVED", allowedRoles: ["REGISTRAR_OFFICER", "REGISTRAR_SUPERVISOR"] },
+    { action: "CLOSE", from: "RESOLVED", to: "CLOSED", allowedRoles: ["CITIZEN", "REGISTRAR_SUPERVISOR"] },
+    { action: "REOPEN", from: "RESOLVED", to: "IN_PROGRESS", allowedRoles: ["CITIZEN"] },
+    { action: "REOPEN", from: "CLOSED", to: "IN_PROGRESS", allowedRoles: ["REGISTRAR_SUPERVISOR"] },
+  ],
+};
+
 const TEMPLATES: Record<string, WorkflowTemplate> = {
   [BIRTH_CERTIFICATE_TEMPLATE.code]: BIRTH_CERTIFICATE_TEMPLATE,
   [TRADING_LICENSE_TEMPLATE.code]: TRADING_LICENSE_TEMPLATE,
+  [COMPLAINT_TEMPLATE.code]: COMPLAINT_TEMPLATE,
 };
 
 export function getTemplate(code: string): WorkflowTemplate | undefined {

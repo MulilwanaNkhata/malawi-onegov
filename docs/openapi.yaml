@@ -1,15 +1,16 @@
 openapi: 3.0.3
 info:
   title: Malawi OneGov — Pilot Public API (via API Gateway)
-  version: 0.2.0
+  version: 0.3.0
   description: >
     Public surface exposed by the API gateway (http://localhost:4000/api) for
-    both pilot services -- Birth Certificate and Trading Licence -- plus the
-    shared platform capabilities (payments, documents, notifications, audit,
-    analytics) every government service reuses. Every downstream service also
-    independently verifies auth on requests it receives, per the platform's
-    defense-in-depth principle. Browse this interactively at
-    http://localhost:4000/docs once the stack is running.
+    all three pilot services -- Birth Certificate, Trading Licence, and
+    Complaints/support -- plus the shared platform capabilities (payments,
+    documents, notifications, audit, analytics) every government service
+    reuses. Every downstream service also independently verifies auth on
+    requests it receives, per the platform's defense-in-depth principle.
+    Browse this interactively at http://localhost:4000/docs once the stack
+    is running.
 
 
     Not included here: `workflow-service` (mounted at `/api/workflow` on the
@@ -91,6 +92,49 @@ components:
             properties:
               count: { type: integer }
               total: { type: number }
+    Complaint:
+      type: object
+      description: >
+        The third pilot service, and a deliberately different-shaped process
+        from the two above: no fee, no approve/reject branch, and a real
+        reopen loop (RESOLVED/CLOSED -> IN_PROGRESS) that the apply-and-issue
+        services never needed.
+      properties:
+        id: { type: string, format: uuid }
+        referenceNumber: { type: string, example: CMP-2026-7D08BE77 }
+        category:
+          type: string
+          enum: [SERVICE_QUALITY, CORRUPTION, DELAY, STAFF_CONDUCT, OTHER]
+        subject: { type: string }
+        description: { type: string }
+        relatedServiceType: { type: string, nullable: true, example: birth_certificate }
+        relatedReferenceNumber: { type: string, nullable: true, example: BC-2026-4F2A9C1E }
+        status:
+          type: string
+          enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
+        responses:
+          type: array
+          items: { $ref: "#/components/schemas/ComplaintResponse" }
+    ComplaintResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        authorUserId: { type: string }
+        authorRole: { type: string }
+        message: { type: string }
+        createdAt: { type: string, format: date-time }
+    ComplaintAnalytics:
+      type: object
+      description: Staff-only. Note the different shape from ApplicationAnalytics -- averageResolutionHours, not averageProcessingHours, and an added byCategory breakdown.
+      properties:
+        totalComplaints: { type: integer }
+        byStatus:
+          type: object
+          additionalProperties: { type: integer }
+        byCategory:
+          type: object
+          additionalProperties: { type: integer }
+        averageResolutionHours: { type: number, nullable: true }
 paths:
   /auth/register:
     post:
@@ -413,6 +457,116 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApplicationAnalytics" }
+        "403": { description: Citizens cannot call this endpoint }
+
+  /complaints/categories:
+    get:
+      summary: Valid complaint categories
+      security: []
+      responses:
+        "200": { description: OK }
+  /complaints:
+    get:
+      summary: List complaints (citizens see their own; staff see the full queue)
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Complaint" }
+    post:
+      summary: File a complaint (citizen only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, subject, description]
+              properties:
+                category: { type: string, enum: [SERVICE_QUALITY, CORRUPTION, DELAY, STAFF_CONDUCT, OTHER] }
+                subject: { type: string, minLength: 3 }
+                description: { type: string, minLength: 10 }
+                relatedServiceType: { type: string }
+                relatedReferenceNumber: { type: string }
+      responses:
+        "201": { description: Complaint created with reference number }
+  /complaints/{id}:
+    get:
+      summary: Complaint detail, including the full response thread
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Complaint" }
+  /complaints/{id}/responses:
+    post:
+      summary: Add a message to the complaint's thread (citizen owner or staff) without necessarily changing status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties: { message: { type: string, minLength: 1 } }
+      responses:
+        "201": { description: Response recorded }
+  /complaints/{id}/action:
+    post:
+      summary: Transition the complaint's status (who may fire which action is enforced by the workflow template)
+      description: >
+        ASSIGN (OPEN -> IN_PROGRESS) and RESOLVE (IN_PROGRESS -> RESOLVED,
+        message required) are staff-only. CLOSE (RESOLVED -> CLOSED) is the
+        citizen confirming they're satisfied, or a supervisor closing
+        administratively. REOPEN is the loop this service has that the other
+        two don't: the citizen can reopen a RESOLVED complaint they're not
+        satisfied with, and a supervisor can reopen a CLOSED one.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [ASSIGN, RESOLVE, CLOSE, REOPEN] }
+                message: { type: string, description: "Required for RESOLVE; recorded as a thread response when present for any action." }
+      responses:
+        "200": { description: New workflow status }
+        "400": { description: "RESOLVE without a message" }
+        "409": { description: "Transition not valid from the current status, or not allowed for the caller's role" }
+  /complaints/analytics:
+    get:
+      summary: Volume by status/category and average time-to-resolve (staff only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComplaintAnalytics" }
         "403": { description: Citizens cannot call this endpoint }
 
   /documents:

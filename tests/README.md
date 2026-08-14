@@ -38,6 +38,11 @@ dependency to install. Requires Node 20+.
   plus an ownership-isolation check and a role-boundary check on approval
 - `trading-license.test.mjs` -- the same, for the second pilot service, plus
   confirming a REJECTED application never gets a certificate
+- `complaints.test.mjs` -- the third pilot service, and a deliberately
+  different-shaped process (no fee, no approve/reject branch): file ->
+  assign -> resolve -> reopen -> resolve -> close with a full response
+  thread and notification checks, ownership isolation, the
+  REGISTRAR_SUPERVISOR-only CLOSE/REOPEN role boundary, and analytics
 - `analytics-and-audit.test.mjs` -- analytics shape/aggregation correctness,
   audit hash-chain integrity, and that both are staff-only
 - `ussd.test.mjs` -- the USSD menu tree against a real running application,

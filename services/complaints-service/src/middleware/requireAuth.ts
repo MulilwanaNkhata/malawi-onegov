@@ -1,0 +1,54 @@
+import type { NextFunction, Request, Response } from "express";
+import jwt from "jsonwebtoken";
+import { timingSafeEqual } from "crypto";
+
+const JWT_SECRET = process.env.JWT_SECRET ?? "dev-insecure-jwt-secret-change-me";
+const SERVICE_SHARED_SECRET = process.env.SERVICE_SHARED_SECRET ?? "";
+
+function safeEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
+
+interface AccessTokenClaims {
+  sub: string;
+  role: string;
+  fullName: string;
+}
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      user?: AccessTokenClaims;
+    }
+  }
+}
+
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) return res.status(401).json({ error: "missing_bearer_token" });
+  try {
+    req.user = jwt.verify(header.slice(7), JWT_SECRET) as AccessTokenClaims;
+    next();
+  } catch {
+    return res.status(401).json({ error: "invalid_or_expired_token" });
+  }
+}
+
+export function requireRole(...roles: string[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return res.status(401).json({ error: "unauthenticated" });
+    if (!roles.includes(req.user.role)) return res.status(403).json({ error: "insufficient_role", required: roles });
+    next();
+  };
+}
+
+export function requireService(req: Request, res: Response, next: NextFunction) {
+  const provided = req.headers["x-service-secret"];
+  if (typeof provided !== "string" || !safeEquals(provided, SERVICE_SHARED_SECRET)) {
+    return res.status(401).json({ error: "unauthorized_service_call" });
+  }
+  next();
+}

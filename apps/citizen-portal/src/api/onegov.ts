@@ -256,3 +256,87 @@ export async function getTradingLicenseAnalytics() {
 export async function setUssdPin(pin: string) {
   await api.post("/users/me/ussd-pin", { pin });
 }
+
+// ---------------------------------------------------------------------------
+// Complaints/support -- the third pilot service, and a deliberately
+// different-shaped process from the two above (no fee, no approve/reject
+// branch, a real reopen loop, and the citizen holds transitions of their
+// own). See services/workflow-service/src/templates.ts for the template.
+// ---------------------------------------------------------------------------
+
+export type ComplaintCategory = "SERVICE_QUALITY" | "CORRUPTION" | "DELAY" | "STAFF_CONDUCT" | "OTHER";
+
+export interface ComplaintResponseEntry {
+  id: string;
+  authorUserId: string;
+  authorRole: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface Complaint {
+  id: string;
+  referenceNumber: string;
+  citizenUserId: string;
+  category: ComplaintCategory;
+  subject: string;
+  description: string;
+  relatedServiceType?: string | null;
+  relatedReferenceNumber?: string | null;
+  status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
+  createdAt: string;
+  responses?: ComplaintResponseEntry[];
+}
+
+export async function getComplaintCategories() {
+  const { data } = await api.get<ComplaintCategory[]>("/complaints/categories");
+  return data;
+}
+
+export interface NewComplaintInput {
+  category: ComplaintCategory;
+  subject: string;
+  description: string;
+  relatedServiceType?: string;
+  relatedReferenceNumber?: string;
+}
+
+export async function createComplaint(input: NewComplaintInput) {
+  const { data } = await api.post("/complaints", input);
+  return data as { id: string; referenceNumber: string; status: string };
+}
+
+export async function listComplaints(status?: string) {
+  const { data } = await api.get<Complaint[]>("/complaints", { params: { status } });
+  return data;
+}
+
+export async function getComplaint(id: string) {
+  const { data } = await api.get<Complaint>(`/complaints/${id}`);
+  return data;
+}
+
+export async function addComplaintResponse(id: string, message: string) {
+  await api.post(`/complaints/${id}/responses`, { message });
+}
+
+export async function complaintAction(
+  id: string,
+  action: "ASSIGN" | "RESOLVE" | "CLOSE" | "REOPEN",
+  message?: string
+) {
+  const { data } = await api.post(`/complaints/${id}/action`, { action, message });
+  return data as { status: string };
+}
+
+export interface ComplaintAnalytics {
+  totalComplaints: number;
+  byStatus: Record<string, number>;
+  byCategory: Record<string, number>;
+  averageResolutionHours: number | null;
+}
+
+export async function getComplaintAnalytics() {
+  const { data } = await api.get<ComplaintAnalytics>("/complaints/analytics");
+  return data;
+}

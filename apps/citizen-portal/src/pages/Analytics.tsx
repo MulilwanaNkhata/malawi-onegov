@@ -4,11 +4,14 @@ import {
   getApplicationAnalytics,
   getPaymentAnalytics,
   getTradingLicenseAnalytics,
+  getComplaintAnalytics,
   type ApplicationAnalytics,
   type PaymentAnalytics,
+  type ComplaintAnalytics,
 } from "../api/onegov";
 
 const STATUS_ORDER = ["SUBMITTED", "UNDER_REVIEW", "ADDITIONAL_INFO_REQUIRED", "APPROVED", "REJECTED", "ISSUED"];
+const COMPLAINT_STATUS_ORDER = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"];
 
 function StatusBreakdown({ stats }: { stats: ApplicationAnalytics }) {
   const { t } = useLanguage();
@@ -40,20 +43,22 @@ export default function Analytics() {
   const [birthCertStats, setBirthCertStats] = useState<ApplicationAnalytics | null>(null);
   const [tradingLicenseStats, setTradingLicenseStats] = useState<ApplicationAnalytics | null>(null);
   const [paymentStats, setPaymentStats] = useState<PaymentAnalytics | null>(null);
+  const [complaintStats, setComplaintStats] = useState<ComplaintAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([getApplicationAnalytics(), getTradingLicenseAnalytics(), getPaymentAnalytics()])
-      .then(([bc, tl, p]) => {
+    Promise.all([getApplicationAnalytics(), getTradingLicenseAnalytics(), getPaymentAnalytics(), getComplaintAnalytics()])
+      .then(([bc, tl, p, c]) => {
         setBirthCertStats(bc);
         setTradingLicenseStats(tl);
         setPaymentStats(p);
+        setComplaintStats(c);
       })
       .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="container">Loading...</div>;
-  if (!birthCertStats || !tradingLicenseStats || !paymentStats) {
+  if (!birthCertStats || !tradingLicenseStats || !paymentStats || !complaintStats) {
     return <div className="container">Could not load analytics.</div>;
   }
 
@@ -68,7 +73,7 @@ export default function Analytics() {
     <div className="container">
       <div className="card">
         <h1>{t("analytics")}</h1>
-        <p className="muted">Across both pilot services (Birth Certificate + Trading Licence)</p>
+        <p className="muted">Across all three pilot services (Birth Certificate, Trading Licence &amp; Complaints)</p>
 
         <div className="stat-grid">
           <div className="stat-tile">
@@ -95,6 +100,10 @@ export default function Analytics() {
             <p className="stat-label">{t("totalTransactions")}</p>
             <p className="stat-value">{paymentStats.totalTransactions.toLocaleString()}</p>
           </div>
+          <div className="stat-tile">
+            <p className="stat-label">{t("myComplaints")}</p>
+            <p className="stat-value">{complaintStats.totalComplaints.toLocaleString()}</p>
+          </div>
         </div>
       </div>
 
@@ -110,6 +119,41 @@ export default function Analytics() {
           {t("applicationsByStatus")} — {t("tradingLicenseService")}
         </h2>
         <StatusBreakdown stats={tradingLicenseStats} />
+      </div>
+
+      <div className="card">
+        <h2>
+          {t("applicationsByStatus")} — {t("complaintsService")}
+        </h2>
+        {complaintStats.totalComplaints === 0 ? (
+          <p className="muted">{t("noDataYet")}</p>
+        ) : (
+          COMPLAINT_STATUS_ORDER.map((status) => {
+            const count = complaintStats.byStatus[status] ?? 0;
+            const maxCount = Math.max(1, ...Object.values(complaintStats.byStatus));
+            const pct = Math.round((count / maxCount) * 100);
+            return (
+              <div className="meter-row" key={status}>
+                <span className="meter-label">{status.replace(/_/g, " ")}</span>
+                <div className="meter-track">
+                  <div className={`meter-fill status-${status}`} style={{ width: `${pct}%` }} />
+                </div>
+                <span className="meter-value">{count}</span>
+              </div>
+            );
+          })
+        )}
+        {Object.keys(complaintStats.byCategory).length > 0 && (
+          <>
+            <h2 style={{ marginTop: 16 }}>{t("complaintCategory")}</h2>
+            {Object.entries(complaintStats.byCategory).map(([category, count]) => (
+              <div className="list-item" key={category}>
+                <span>{category.replace(/_/g, " ")}</span>
+                <span className="muted">{count}</span>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       <div className="card">

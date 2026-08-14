@@ -14,6 +14,9 @@ import NewTradingLicense from "./pages/NewTradingLicense";
 import TradingLicenseDetail from "./pages/TradingLicenseDetail";
 import StaffTradingLicenseQueue from "./pages/StaffTradingLicenseQueue";
 import Profile from "./pages/Profile";
+import NewComplaint from "./pages/NewComplaint";
+import ComplaintDetail from "./pages/ComplaintDetail";
+import StaffComplaintQueue from "./pages/StaffComplaintQueue";
 
 export default function App() {
   const { user, logout, isStaff } = useAuth();
@@ -100,6 +103,30 @@ export default function App() {
           }
         />
         <Route
+          path="/complaints/new"
+          element={
+            <ProtectedRoute>
+              <NewComplaint />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/complaints/:id"
+          element={
+            <ProtectedRoute>
+              <ComplaintDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/staff/complaints"
+          element={
+            <ProtectedRoute staffOnly>
+              <StaffComplaintQueue />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/profile"
           element={
             <ProtectedRoute>
@@ -133,7 +160,7 @@ export default function App() {
         />
       </Routes>
 
-      <footer>Malawi OneGov — pilot scaffold (Birth Certificate &amp; Trading Licence journeys)</footer>
+      <footer>Malawi OneGov — pilot scaffold (Birth Certificate, Trading Licence &amp; Complaints journeys)</footer>
     </>
   );
 }

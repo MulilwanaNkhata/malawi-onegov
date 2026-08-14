@@ -201,9 +201,15 @@ a {
   color: var(--color-danger);
 }
 
-.status-ADDITIONAL_INFO_REQUIRED {
+.status-ADDITIONAL_INFO_REQUIRED,
+.status-IN_PROGRESS {
   background: #fbe9c8;
   color: var(--color-warning);
+}
+
+.status-RESOLVED {
+  background: #d5f0e1;
+  color: #0a6847;
 }
 
 .list-item {

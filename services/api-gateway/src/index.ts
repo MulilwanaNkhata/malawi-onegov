@@ -38,6 +38,7 @@ const CIVIL_REGISTRATION_SERVICE_URL =
 const TRADING_LICENSE_SERVICE_URL =
   process.env.TRADING_LICENSE_SERVICE_URL ?? "http://trading-license-service:4008";
 const USSD_GATEWAY_URL = process.env.USSD_GATEWAY_URL ?? "http://ussd-gateway:4009";
+const COMPLAINTS_SERVICE_URL = process.env.COMPLAINTS_SERVICE_URL ?? "http://complaints-service:4010";
 
 // General API traffic.
 app.use(rateLimit({ windowMs: 60_000, max: 300, standardHeaders: true, legacyHeaders: false }));
@@ -119,6 +120,13 @@ app.use(
     pathRewrite: { "^/api/workflow": "/instances" },
   })
 );
+app.use(
+  createProxyMiddleware("/api/complaints", {
+    target: COMPLAINTS_SERVICE_URL,
+    changeOrigin: true,
+    pathRewrite: { "^/api/complaints": "/complaints" },
+  })
+);
 // Not under /api/ deliberately: this is the webhook a USSD aggregator (e.g.
 // Africa's Talking) calls directly, a different contract (plain text
 // CON/END responses, not JSON) from the rest of the citizen-facing API.
@@ -143,6 +151,7 @@ app.get("/health/deep", async (_req, res) => {
     civilRegistration: CIVIL_REGISTRATION_SERVICE_URL,
     tradingLicense: TRADING_LICENSE_SERVICE_URL,
     ussdGateway: USSD_GATEWAY_URL,
+    complaints: COMPLAINTS_SERVICE_URL,
   };
   const results = await Promise.all(
     Object.entries(targets).map(async ([name, url]) => {

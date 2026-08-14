@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Complaint {
+  id               String   @id @default(uuid())
+  referenceNumber  String   @unique
+  citizenUserId    String
+
+  category         String // SERVICE_QUALITY, CORRUPTION, DELAY, STAFF_CONDUCT, OTHER
+  subject          String
+  description      String
+
+  // Optional link to a specific application this complaint is about (e.g. a
+  // slow Birth Certificate review) -- free-text, not a foreign key, since
+  // it may point into any domain service's own reference-number scheme.
+  relatedServiceType     String?
+  relatedReferenceNumber String?
+
+  // Denormalized read-model copy of the authoritative workflow-service
+  // state, kept in sync via the application.status_changed event -- same
+  // pattern as civil-registration-service and trading-license-service.
+  status           String   @default("OPEN")
+
+  workflowInstanceId String?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  responses        ComplaintResponse[]
+
+  @@index([citizenUserId])
+  @@index([status])
+}
+
+model ComplaintResponse {
+  id           String    @id @default(uuid())
+  complaintId  String
+  complaint    Complaint @relation(fields: [complaintId], references: [id])
+  authorUserId String
+  authorRole   String
+  message      String
+  createdAt    DateTime  @default(now())
+
+  @@index([complaintId])
+}

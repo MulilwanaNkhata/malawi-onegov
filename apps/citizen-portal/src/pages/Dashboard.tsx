@@ -5,8 +5,10 @@ import { useLanguage } from "../i18n/LanguageContext";
 import {
   listApplications,
   listTradingLicenses,
+  listComplaints,
   type BirthCertificateApplication,
   type TradingLicenseApplication,
+  type Complaint,
 } from "../api/onegov";
 import { StatusPill } from "../components/StatusPill";
 
@@ -15,6 +17,7 @@ export default function Dashboard() {
   const { t } = useLanguage();
   const [applications, setApplications] = useState<BirthCertificateApplication[]>([]);
   const [licenses, setLicenses] = useState<TradingLicenseApplication[]>([]);
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -22,10 +25,11 @@ export default function Dashboard() {
       setLoading(false);
       return;
     }
-    Promise.all([listApplications(), listTradingLicenses()])
-      .then(([apps, lics]) => {
+    Promise.all([listApplications(), listTradingLicenses(), listComplaints()])
+      .then(([apps, lics, cmps]) => {
         setApplications(apps);
         setLicenses(lics);
+        setComplaints(cmps);
       })
       .finally(() => setLoading(false));
   }, [isStaff]);
@@ -44,6 +48,9 @@ export default function Dashboard() {
             </Link>
             <Link className="btn btn-secondary" to="/staff/trading-licenses">
               {t("tradingLicenseService")} {t("staffQueue")}
+            </Link>
+            <Link className="btn btn-secondary" to="/staff/complaints">
+              {t("complaintsService")} {t("staffQueue")}
             </Link>
             <Link className="btn btn-secondary" to="/staff/analytics">
               {t("analytics")}
@@ -104,6 +111,34 @@ export default function Dashboard() {
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <StatusPill status={license.status} />
                     <Link to={`/trading-licenses/${license.id}`}>{t("viewDetails")}</Link>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="card">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h2>{t("myComplaints")}</h2>
+              <Link className="btn" to="/complaints/new">
+                {t("fileComplaint")}
+              </Link>
+            </div>
+
+            {loading ? (
+              <p className="muted">...</p>
+            ) : complaints.length === 0 ? (
+              <p className="muted">{t("noApplications")}</p>
+            ) : (
+              complaints.map((complaint) => (
+                <div className="list-item" key={complaint.id}>
+                  <div>
+                    <strong>{complaint.subject}</strong>
+                    <div className="muted">{complaint.referenceNumber}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <StatusPill status={complaint.status} />
+                    <Link to={`/complaints/${complaint.id}`}>{t("viewDetails")}</Link>
                   </div>
                 </div>
               ))
