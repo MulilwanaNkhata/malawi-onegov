@@ -28,6 +28,7 @@ describe("USSD gateway (feature-phone access)", () => {
     assert.match(response, /Check Trading Licence status/);
     assert.match(response, /Apply for a Trading Licence/);
     assert.match(response, /Apply for a Birth Certificate/);
+    assert.match(response, /Pay a fee/);
   });
 
   test("option 1 prompts for a Birth Certificate reference number", async () => {
@@ -85,7 +86,7 @@ describe("USSD gateway (feature-phone access)", () => {
   });
 
   test("the help option ends the session with contact information", async () => {
-    const response = await dial({ sessionId: "t-help", text: "5" });
+    const response = await dial({ sessionId: "t-help", text: "6" });
     assert.match(response, /^END /);
     assert.match(response, /199/);
   });
@@ -297,6 +298,216 @@ describe("USSD gateway: PIN-authenticated Birth Certificate application (option 
     await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "7788" }, supervisorToken);
 
     const response = await dial({ sessionId: "t-bc-staff-apply", text: `4*${SEEDED_SUPERVISOR_PHONE}*7788` });
+    assert.match(response, /^END /);
+    assert.match(response, /only available to citizen accounts/i);
+  });
+});
+
+describe("USSD gateway: PIN-authenticated fee payment (option 5)", () => {
+  test("a citizen who has never set a USSD PIN is rejected, not crashed", async () => {
+    const citizen = await registerAndLoginCitizen("Pay No PIN Yet");
+    const response = await dial({ sessionId: "t-pay-nopin", text: `5*${citizen.phone}*1234` });
+    assert.match(response, /^END /);
+    assert.match(response, /incorrect phone number or pin/i);
+  });
+
+  test("setting a USSD PIN, then paying a Birth Certificate fee entirely over USSD drives the application to UNDER_REVIEW", async () => {
+    const citizen = await registerAndLoginCitizen("Pay BC Applicant");
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "6060" }, citizen.accessToken);
+
+    const application = await apiOrThrow(
+      "POST",
+      "/applications",
+      {
+        childFullName: "Pay Flow Baby",
+        dateOfBirth: "2026-02-10",
+        placeOfBirth: "Mzuzu",
+        sex: "MALE",
+        motherFullName: "Pay Flow Mother",
+      },
+      citizen.accessToken
+    );
+    assert.equal(application.status, "SUBMITTED");
+
+    const wrongPin = await dial({ sessionId: "t-pay-wrong", text: `5*${citizen.phone}*0000` });
+    assert.match(wrongPin, /^END /, "a wrong PIN must end the session, not let the caller keep guessing mid-session");
+    assert.match(wrongPin, /incorrect phone number or pin/i);
+
+    const refPrompt = await dial({ sessionId: "t-pay-bc", text: `5*${citizen.phone}*6060` });
+    assert.match(refPrompt, /^CON /);
+    assert.match(refPrompt, /reference number/i);
+
+    const providerMenu = await dial({
+      sessionId: "t-pay-bc",
+      text: `5*${citizen.phone}*6060*${application.referenceNumber}`,
+    });
+    assert.match(providerMenu, /^CON /);
+    assert.match(providerMenu, /mobile money provider/i);
+
+    const final = await dial({
+      sessionId: "t-pay-bc",
+      text: `5*${citizen.phone}*6060*${application.referenceNumber}*1`,
+    });
+    assert.match(final, /^END /);
+    assert.match(final, /payment of 2000 mwk started via airtel money/i, `expected fee amount/provider in: ${final}`);
+
+    const underReview = await waitUntil(async () => {
+      const current = await apiOrThrow("GET", `/applications/${application.id}`, undefined, citizen.accessToken);
+      return current.status === "UNDER_REVIEW" ? current : null;
+    });
+    assert.ok(underReview, "application did not reach UNDER_REVIEW after the USSD-initiated payment was confirmed");
+    assert.equal(underReview.payment.status, "COMPLETED");
+
+    const payments = await apiOrThrow("GET", "/payments", undefined, citizen.accessToken);
+    const payment = payments.find((p) => p.entityId === application.id);
+    assert.ok(payment, "the USSD-initiated payment should show up in the citizen's own portal payment history");
+    assert.equal(payment.provider, "AIRTEL_MONEY", "option 1 in the provider menu must map to AIRTEL_MONEY");
+    assert.equal(payment.phoneNumber, citizen.phone, "the payment should use the phone number the citizen dialed in with");
+  });
+
+  test("paying a Trading Licence fee over USSD also works (reference-number prefix detects the right service)", async () => {
+    const citizen = await registerAndLoginCitizen("Pay TL Applicant");
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "7070" }, citizen.accessToken);
+
+    const license = await apiOrThrow(
+      "POST",
+      "/trading-licenses",
+      {
+        businessName: "Pay Flow Shop",
+        businessType: "RETAIL",
+        tradingAddress: "Pay Flow Road",
+        district: "Blantyre",
+        ownerFullName: "Pay Flow Applicant",
+      },
+      citizen.accessToken
+    );
+
+    const final = await dial({
+      sessionId: "t-pay-tl",
+      text: `5*${citizen.phone}*7070*${license.referenceNumber}*2`,
+    });
+    assert.match(final, /^END /);
+    assert.match(final, /payment of 15000 mwk started via tnm mpamba/i, `expected fee amount/provider in: ${final}`);
+
+    const underReview = await waitUntil(async () => {
+      const current = await apiOrThrow("GET", `/trading-licenses/${license.id}`, undefined, citizen.accessToken);
+      return current.status === "UNDER_REVIEW" ? current : null;
+    });
+    assert.ok(underReview, "trading licence did not reach UNDER_REVIEW after the USSD-initiated payment was confirmed");
+  });
+
+  test("an unknown reference number gets a clean not-found message, not an error", async () => {
+    const citizen = await registerAndLoginCitizen("Pay Unknown Ref");
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "8080" }, citizen.accessToken);
+
+    const response = await dial({
+      sessionId: "t-pay-unknown",
+      text: `5*${citizen.phone}*8080*BC-2026-DOESNOTEXIST`,
+    });
+    assert.match(response, /^END /);
+    assert.match(response, /no application found/i);
+  });
+
+  test("a reference number that belongs to someone else is rejected", async () => {
+    const owner = await registerAndLoginCitizen("Pay Real Owner");
+    const application = await apiOrThrow(
+      "POST",
+      "/applications",
+      {
+        childFullName: "Not Yours Baby",
+        dateOfBirth: "2026-03-01",
+        placeOfBirth: "Lilongwe",
+        sex: "FEMALE",
+        motherFullName: "Not Yours Mother",
+      },
+      owner.accessToken
+    );
+
+    const stranger = await registerAndLoginCitizen("Pay Stranger");
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "9090" }, stranger.accessToken);
+
+    const response = await dial({
+      sessionId: "t-pay-notmine",
+      text: `5*${stranger.phone}*9090*${application.referenceNumber}`,
+    });
+    assert.match(response, /^END /);
+    assert.match(response, /does not belong to your account/i);
+  });
+
+  test("an application whose fee is already paid cannot be paid again over USSD", async () => {
+    const citizen = await registerAndLoginCitizen("Pay Twice Applicant");
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "1212" }, citizen.accessToken);
+
+    const application = await apiOrThrow(
+      "POST",
+      "/applications",
+      {
+        childFullName: "Pay Twice Baby",
+        dateOfBirth: "2026-04-01",
+        placeOfBirth: "Zomba",
+        sex: "MALE",
+        motherFullName: "Pay Twice Mother",
+      },
+      citizen.accessToken
+    );
+
+    await apiOrThrow(
+      "POST",
+      "/payments",
+      {
+        entityType: "birth_certificate",
+        entityId: application.id,
+        amount: 2000,
+        currency: "MWK",
+        provider: "AIRTEL_MONEY",
+        phoneNumber: citizen.phone,
+      },
+      citizen.accessToken
+    );
+
+    await waitUntil(async () => {
+      const current = await apiOrThrow("GET", `/applications/${application.id}`, undefined, citizen.accessToken);
+      return current.status === "UNDER_REVIEW" ? current : null;
+    });
+
+    const response = await dial({
+      sessionId: "t-pay-twice",
+      text: `5*${citizen.phone}*1212*${application.referenceNumber}`,
+    });
+    assert.match(response, /^END /);
+    assert.match(response, /already been paid/i);
+  });
+
+  test("an invalid provider-menu digit ends the session cleanly", async () => {
+    const citizen = await registerAndLoginCitizen("Pay Bad Provider");
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "3434" }, citizen.accessToken);
+
+    const application = await apiOrThrow(
+      "POST",
+      "/applications",
+      {
+        childFullName: "Bad Provider Baby",
+        dateOfBirth: "2026-05-01",
+        placeOfBirth: "Karonga",
+        sex: "FEMALE",
+        motherFullName: "Bad Provider Mother",
+      },
+      citizen.accessToken
+    );
+
+    const response = await dial({
+      sessionId: "t-pay-badprovider",
+      text: `5*${citizen.phone}*3434*${application.referenceNumber}*9`,
+    });
+    assert.match(response, /^END /);
+    assert.match(response, /invalid selection/i);
+  });
+
+  test("only a citizen account may pay a fee over USSD, even with a valid PIN", async () => {
+    const supervisorToken = await loginAsSupervisor();
+    await apiOrThrow("POST", "/users/me/ussd-pin", { pin: "5656" }, supervisorToken);
+
+    const response = await dial({ sessionId: "t-pay-staff", text: `5*${SEEDED_SUPERVISOR_PHONE}*5656` });
     assert.match(response, /^END /);
     assert.match(response, /only available to citizen accounts/i);
   });

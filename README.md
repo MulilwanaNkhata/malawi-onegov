@@ -42,7 +42,7 @@ running (see "Developer portal" below).
 | `notification-service` | 4006 | Event-driven SMS (mock) / email (MailHog) notifications |
 | `civil-registration-service` | 4007 | Birth Certificate domain logic, orchestrates the above |
 | `trading-license-service` | 4008 | Trading Licence domain logic -- the second pilot service, reusing everything above |
-| `ussd-gateway` | 4009 | Feature-phone access: check status by reference number, or apply for a Trading Licence or Birth Certificate, over USSD (PIN-authenticated) |
+| `ussd-gateway` | 4009 | Feature-phone access: check status, apply, and pay the fee for a Trading Licence or Birth Certificate, over USSD (PIN-authenticated) |
 | `complaints-service` | 4010 | Complaints/support domain logic -- the third pilot service, and a genuinely different-shaped workflow (no fee, has a reopen loop) |
 | `citizen-portal` | 5173 | Mobile-first React SPA, English/Chichewa |
 
@@ -153,8 +153,9 @@ changes needed.
 Every other service assumes a smartphone. This is the part of the pilot
 built specifically for citizens who don't have one: over a plain USSD
 session (no app, no internet), a citizen can check a Birth Certificate or
-Trading Licence's status by reference number, **or apply for a Trading
-Licence or a Birth Certificate from scratch**.
+Trading Licence's status by reference number, apply for either **from
+scratch**, and **pay the application fee** -- the whole apply-and-pay
+journey, not just status lookup, works without ever touching a smartphone.
 
 ```bash
 node scripts/ussd-simulator.mjs
@@ -179,6 +180,13 @@ every key press re-sends the full accumulated input, and the app responds
   date the portal's date picker already stores; the mother's/father's
   National ID and the father's details themselves are all optional, entered
   as `0` to skip.
+- **Option 5** pays the fee on an existing application, also PIN-authenticated.
+  Enter the reference number and it figures out which service it belongs to
+  from the prefix (`BC-` or `TL-`) automatically -- no need to pick a service
+  first. The amount is read from the application itself (no typing it in,
+  no partial payments), and it's rejected up front if the reference number
+  isn't yours or the fee's already been paid, before it ever reaches the
+  provider menu.
 
 ## Developer portal
 
@@ -206,14 +214,15 @@ docker compose up -d   # stack must be running
 npm test
 ```
 
-56 integration tests against the live stack (no mocking, no direct DB
+64 integration tests against the live stack (no mocking, no direct DB
 access) covering auth/MFA (both the optional-at-login and full TOTP paths --
 see "Seed the two staff accounts" above), all three pilot services end to
 end (including the complaints reopen loop), analytics, the audit hash-chain,
-the USSD gateway (including PIN enrollment, PIN lockout, and full Trading
-Licence and Birth Certificate applications submitted entirely over USSD), document upload
-validation, and the developer portal. See `tests/README.md` for what's
-covered and, just as importantly, what isn't.
+the USSD gateway (including PIN enrollment, PIN lockout, full Trading
+Licence and Birth Certificate applications submitted entirely over USSD,
+and fee payments over USSD that drive an application all the way to
+`UNDER_REVIEW`), document upload validation, and the developer portal. See
+`tests/README.md` for what's covered and, just as importantly, what isn't.
 
 **This suite already earned its keep once**: running it under real
 concurrent load caught a genuine race condition in `audit-service` -- the
@@ -362,13 +371,13 @@ monorepo's build tooling with it.
   requirements. It's also **not required at login by default locally**
   (`MFA_REQUIRED=false` in `docker-compose.yml`) -- a real deployment should
   set it back to `true`; see "Seed the two staff accounts" above.
-- **USSD** (`ussd-gateway`) now covers status lookup *and* applying for
-  either a Trading Licence or a Birth Certificate end to end, authenticated
-  by a PIN set from the portal (see "Try the USSD channel" above) --
-  distinct from the smartphone TOTP flow, since feature phones can't run an
-  authenticator app. Not yet built: paying the fee over USSD (still
-  portal-only), and a self-service PIN reset without the portal (currently:
-  set a new one from the portal, which overwrites the old one).
+- **USSD** (`ussd-gateway`) now covers the whole apply-and-pay journey for
+  both Birth Certificate and Trading Licence, plus status lookup,
+  authenticated by a PIN set from the portal (see "Try the USSD channel"
+  above) -- distinct from the smartphone TOTP flow, since feature phones
+  can't run an authenticator app. Not yet built: a self-service PIN reset
+  without the portal (currently: set a new one from the portal, which
+  overwrites the old one).
 - **Payments and SMS are mocked** (see `docs/ARCHITECTURE.md` → "What
   production would change") so the pilot runs without live telco/mobile
   money credentials.

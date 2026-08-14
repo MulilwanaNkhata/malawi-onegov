@@ -43,6 +43,7 @@ flowchart TB
   ussdgw --> identity
   ussdgw --> civilreg
   ussdgw --> tradinglicense
+  ussdgw --> payment
 
   gw --> identity
   gw --> civilreg

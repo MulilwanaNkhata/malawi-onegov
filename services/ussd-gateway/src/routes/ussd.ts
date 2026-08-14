@@ -5,6 +5,8 @@ import {
   verifyUssdPin,
   submitTradingLicenseApplication,
   submitBirthCertificateApplication,
+  lookupPayableApplication,
+  initiatePaymentOnBehalf,
   type ApplicationStatus,
 } from "../lib/internalClients.js";
 
@@ -24,13 +26,20 @@ function describe(app: ApplicationStatus): string {
 }
 
 const ROOT_MENU =
-  "CON Welcome to Malawi OneGov\n1. Check Birth Certificate status\n2. Check Trading Licence status\n3. Apply for a Trading Licence\n4. Apply for a Birth Certificate\n5. Help";
+  "CON Welcome to Malawi OneGov\n1. Check Birth Certificate status\n2. Check Trading Licence status\n3. Apply for a Trading Licence\n4. Apply for a Birth Certificate\n5. Pay a fee\n6. Help";
 
 const BUSINESS_TYPES = ["RETAIL", "RESTAURANT", "SERVICES", "MANUFACTURING", "OTHER"] as const;
 const BUSINESS_TYPE_MENU =
   "CON Select the business type:\n1. Retail\n2. Restaurant\n3. Services\n4. Manufacturing\n5. Other";
 
 const CHILD_SEX_MENU = "CON Select the child's sex:\n1. Male\n2. Female";
+
+const PAYMENT_PROVIDERS = ["AIRTEL_MONEY", "TNM_MPAMBA"] as const;
+const PAYMENT_PROVIDER_LABELS: Record<(typeof PAYMENT_PROVIDERS)[number], string> = {
+  AIRTEL_MONEY: "Airtel Money",
+  TNM_MPAMBA: "TNM Mpamba",
+};
+const PAYMENT_PROVIDER_MENU = "CON Select your mobile money provider:\n1. Airtel Money\n2. TNM Mpamba";
 
 /**
  * Parses an 8-digit DDMMYYYY entry (the only format a feature-phone keypad
@@ -70,9 +79,10 @@ const PIN_ERROR_MESSAGES: Record<"invalid" | "locked" | "error", string> = {
  * continues) or "END " (final screen, session closes) exactly as the
  * protocol requires.
  *
- * The apply-for-a-licence flow (option 3) and apply-for-a-birth-certificate
- * flow (option 4) both re-verify the phone+PIN against identity-service on
- * every single step, not just once at entry. Because
+ * The apply-for-a-licence flow (option 3), apply-for-a-birth-certificate
+ * flow (option 4), and pay-a-fee flow (option 5) all re-verify the
+ * phone+PIN against identity-service on every single step, not just once
+ * at entry. Because
  * the design is stateless and the aggregator always resends the full text,
  * that's the only way to avoid trusting an unauthenticated replay of a
  * partial session -- and since a wrong PIN always ends the session
@@ -221,7 +231,64 @@ router.post("/", async (req, res) => {
     }
   }
 
-  if (parts[0] === "5" && parts.length === 1) {
+  if (parts[0] === "5") {
+    if (parts.length === 1) return res.send("CON Enter your phone number as registered on OneGov (e.g. +265991234567):");
+    if (parts.length === 2) return res.send("CON Enter your USSD PIN:");
+
+    // Same re-verify-every-step design as options 3 and 4 above.
+    const auth = await verifyUssdPin(parts[1], parts[2]);
+    if (!auth.ok) return res.send(PIN_ERROR_MESSAGES[auth.reason]);
+    if (auth.role !== "CITIZEN") return res.send("END This service is only available to citizen accounts.");
+
+    if (parts.length === 3) {
+      return res.send("CON Enter the reference number of the application you want to pay for (e.g. BC-2026-... or TL-2026-...):");
+    }
+
+    // Re-resolved on every step below too, for the same reason the PIN is
+    // re-verified every step: the aggregator resends the full session text
+    // each time, so ownership and payability have to be re-checked, not
+    // just trusted from an earlier response.
+    const referenceNumber = parts[3].trim();
+    const payable = await lookupPayableApplication(referenceNumber);
+    if (!payable) {
+      return res.send("END No application found with that reference number.");
+    }
+    if (payable.applicantUserId !== auth.userId) {
+      return res.send("END This application does not belong to your account.");
+    }
+    if (payable.status !== "SUBMITTED") {
+      return res.send(
+        `END This application's fee has already been paid, or it isn't ready for payment (status: ${payable.status}).`
+      );
+    }
+
+    if (parts.length === 4) return res.send(PAYMENT_PROVIDER_MENU);
+
+    const providerChoice = Number(parts[4]);
+    if (!Number.isInteger(providerChoice) || providerChoice < 1 || providerChoice > PAYMENT_PROVIDERS.length) {
+      return res.send("END Invalid selection. Please dial again and follow the menu.");
+    }
+    const provider = PAYMENT_PROVIDERS[providerChoice - 1];
+
+    if (parts.length === 5) {
+      const result = await initiatePaymentOnBehalf(auth.userId, {
+        entityType: payable.entityType,
+        entityId: payable.id,
+        amount: payable.feeAmount,
+        currency: payable.feeCurrency,
+        provider,
+        phoneNumber: parts[1],
+      });
+      if (!result) {
+        return res.send("END Could not start your payment right now. Please try again shortly, or use the OneGov portal.");
+      }
+      return res.send(
+        `END Payment of ${payable.feeAmount} ${payable.feeCurrency} started via ${PAYMENT_PROVIDER_LABELS[provider]}.\nYou'll be notified once it's confirmed -- usually within a few seconds.`
+      );
+    }
+  }
+
+  if (parts[0] === "6" && parts.length === 1) {
     return res.send("END For help, call 199 (toll-free) or visit your nearest District Office.");
   }
 

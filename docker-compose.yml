@@ -269,12 +269,15 @@ services:
       CIVIL_REGISTRATION_SERVICE_URL: http://civil-registration-service:4007
       TRADING_LICENSE_SERVICE_URL: http://trading-license-service:4008
       IDENTITY_SERVICE_URL: http://identity-service:4001
+      PAYMENT_SERVICE_URL: http://payment-service:4005
     depends_on:
       civil-registration-service:
         condition: service_started
       trading-license-service:
         condition: service_started
       identity-service:
+        condition: service_started
+      payment-service:
         condition: service_started
     ports:
       - "4009:4009"

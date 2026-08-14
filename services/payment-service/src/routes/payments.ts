@@ -60,11 +60,14 @@ const initiateSchema = z.object({
   phoneNumber: z.string().min(9),
 });
 
-router.post("/", requireAuth, async (req, res) => {
-  const parsed = initiateSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "validation_error", details: parsed.error.flatten() });
-  const { entityType, entityId, amount, currency, provider, phoneNumber } = parsed.data;
-
+/** Shared by the citizen-facing POST / below and the internal pay-on-behalf endpoint (USSD channel). */
+async function createAndInitiatePayment(
+  payerUserId: string,
+  actorRole: string,
+  data: z.infer<typeof initiateSchema>,
+  channel: "portal" | "ussd"
+) {
+  const { entityType, entityId, amount, currency, provider, phoneNumber } = data;
   const referenceNumber = `PAY-${new Date().getFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
 
   const payment = await db.payment.create({
@@ -72,7 +75,7 @@ router.post("/", requireAuth, async (req, res) => {
       referenceNumber,
       entityType,
       entityId,
-      payerUserId: req.user!.sub,
+      payerUserId,
       amount,
       currency,
       provider,
@@ -85,19 +88,56 @@ router.post("/", requireAuth, async (req, res) => {
   await db.payment.update({ where: { id: payment.id }, data: { providerTransactionId } });
 
   await recordAuditEvent({
-    actorUserId: req.user!.sub,
-    actorRole: req.user!.role,
+    actorUserId: payerUserId,
+    actorRole,
     action: "PAYMENT_INITIATED",
     resourceType: "Payment",
     resourceId: payment.id,
-    metadata: { referenceNumber, provider, amount },
+    metadata: { referenceNumber, provider, amount, channel },
   });
 
+  return { id: payment.id, referenceNumber };
+}
+
+router.post("/", requireAuth, async (req, res) => {
+  const parsed = initiateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "validation_error", details: parsed.error.flatten() });
+
+  const { id, referenceNumber } = await createAndInitiatePayment(req.user!.sub, req.user!.role, parsed.data, "portal");
+
   return res.status(201).json({
-    id: payment.id,
+    id,
     referenceNumber,
     status: "PENDING",
     note: "In this scaffold, payment auto-completes ~3s after initiation to simulate a mobile money provider webhook.",
+  });
+});
+
+const payOnBehalfSchema = initiateSchema
+  .omit({ provider: true })
+  .extend({ payerUserId: z.string().uuid(), provider: z.enum(["AIRTEL_MONEY", "TNM_MPAMBA"]) });
+
+/**
+ * Internal only: lets a trusted channel service (currently ussd-gateway)
+ * start a fee payment on a citizen's behalf, having already authenticated
+ * and authorized them itself (PIN + ownership check, not a JWT -- feature
+ * phones can't hold a session token). Deliberately excludes BANK_TRANSFER
+ * from the provider choice -- that's not something a USSD menu maps to.
+ */
+router.post("/internal/pay-on-behalf", async (req, res) => {
+  if (!isValidServiceSecret(req)) {
+    return res.status(401).json({ error: "unauthorized_service_call" });
+  }
+  const parsed = payOnBehalfSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "validation_error", details: parsed.error.flatten() });
+
+  const { payerUserId, ...data } = parsed.data;
+  const { id, referenceNumber } = await createAndInitiatePayment(payerUserId, "CITIZEN", data, "ussd");
+
+  return res.status(201).json({
+    id,
+    referenceNumber,
+    status: "PENDING",
   });
 });
 

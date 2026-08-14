@@ -209,16 +209,27 @@ router.get("/:id/certificate", requireAuth, async (req, res) => {
   }
 });
 
-/** Internal: lets a trusted channel service (e.g. ussd-gateway) look up status by the citizen-facing reference number, without needing a citizen session. */
+/**
+ * Internal: lets a trusted channel service (e.g. ussd-gateway) look up a
+ * license by the citizen-facing reference number, without needing a
+ * citizen session. Includes applicantUserId and fee details -- beyond
+ * status lookup, ussd-gateway also uses this to authorize and price a
+ * pay-a-fee-over-USSD request, which needs to know who owns the
+ * application and exactly how much is owed before it can act on it.
+ */
 router.get("/internal/by-reference/:referenceNumber", requireService, async (req, res) => {
   const application = await db.tradingLicenseApplication.findUnique({
     where: { referenceNumber: req.params.referenceNumber },
   });
   if (!application) return res.status(404).json({ error: "not_found" });
   return res.json({
+    id: application.id,
     referenceNumber: application.referenceNumber,
     label: application.businessName,
     status: application.status,
+    applicantUserId: application.applicantUserId,
+    feeAmount: application.feeAmount,
+    feeCurrency: application.feeCurrency,
     createdAt: application.createdAt,
   });
 });
