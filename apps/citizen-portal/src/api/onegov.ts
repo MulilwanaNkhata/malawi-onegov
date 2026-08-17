@@ -258,6 +258,26 @@ export async function setUssdPin(pin: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Web Push -- opt-in browser/device push notifications, layered onto the
+// existing SMS/email channels in notification-service. See
+// src/lib/pushSubscription.ts for the browser-side subscribe/unsubscribe flow
+// that calls these.
+// ---------------------------------------------------------------------------
+
+export async function getPushPublicKey() {
+  const { data } = await api.get<{ publicKey: string }>("/notifications/push/public-key");
+  return data.publicKey;
+}
+
+export async function subscribeToPush(subscription: PushSubscriptionJSON) {
+  await api.post("/notifications/push/subscribe", subscription);
+}
+
+export async function unsubscribeFromPush(endpoint: string) {
+  await api.delete("/notifications/push/subscribe", { data: { endpoint } });
+}
+
+// ---------------------------------------------------------------------------
 // Complaints/support -- the third pilot service, and a deliberately
 // different-shaped process from the two above (no fee, no approve/reject
 // branch, a real reopen loop, and the citizen holds transitions of their

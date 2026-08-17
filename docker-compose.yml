@@ -188,6 +188,14 @@ services:
       CIVIL_REGISTRATION_SERVICE_URL: http://civil-registration-service:4007
       TRADING_LICENSE_SERVICE_URL: http://trading-license-service:4008
       COMPLAINTS_SERVICE_URL: http://complaints-service:4010
+      # Dev-only VAPID keypair for Web Push -- unlike the JWT/service secrets
+      # above, this one is *meant* to have its public half exposed to the
+      # browser (it's how a push subscription is opened at all); only the
+      # private key is sensitive, and this default is fine for local/demo
+      # use exactly like the other dev-insecure defaults in this file.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-BDvqIrVkrem300GUlnrAixIxPcA42_Z1Ad2Ke1akXoNxvuT5idNXCBzguJpH9byy65NtB60fxAXVChip9qORU4w}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-K6lEQ4g7fojneQ4mlsVZbQpmFGhQ53FpfCVm91N0sUk}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:onegov-admin@example.com}
     depends_on:
       postgres:
         condition: service_healthy

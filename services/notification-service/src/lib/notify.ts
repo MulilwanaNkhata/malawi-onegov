@@ -1,5 +1,6 @@
 import { db } from "./db.js";
 import { sendSms, sendEmail } from "./channels.js";
+import { sendPush } from "./pushAdapter.js";
 import { resolveUserContact } from "./internalClients.js";
 
 export async function notifyUser(
@@ -39,5 +40,23 @@ export async function notifyUser(
       });
       console.error("[notification-service] email failed", (err as Error).message);
     }
+  }
+
+  // Push is opt-in from the citizen-portal PWA (Profile page) -- only
+  // attempt it, and only log it, if there's actually a subscription to
+  // send to; a citizen who never enabled push shouldn't accumulate FAILED
+  // rows for a channel they never turned on.
+  try {
+    const { sent, providerRef } = await sendPush(recipientUserId, { title: subject, body });
+    if (sent > 0) {
+      await db.notificationLog.create({
+        data: { recipientUserId, channel: "PUSH", templateCode, subject, body, status: "SENT", providerRef },
+      });
+    }
+  } catch (err) {
+    await db.notificationLog.create({
+      data: { recipientUserId, channel: "PUSH", templateCode, subject, body, status: "FAILED" },
+    });
+    console.error("[notification-service] push failed", (err as Error).message);
   }
 }

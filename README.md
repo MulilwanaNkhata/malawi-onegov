@@ -222,6 +222,40 @@ without a live connection.
   exempted for exactly this kind of local testing) -- see "What production
   would change" in `docs/ARCHITECTURE.md`.
 
+## Push notifications
+
+Being an installable app is also what makes push notifications possible --
+this is the piece the brief calls out explicitly ("SMS/email/**push**
+notification gateway") that only became reachable once `citizen-portal`
+was a real PWA.
+
+1. Log in, open **Profile**, and click **Enable push notifications**. The
+   browser's own permission prompt appears; accept it.
+2. Trigger any notification-worthy event -- submit an application, pay a
+   fee, get a complaint response -- and a real OS-level notification
+   arrives, even in a background tab.
+
+Unlike SMS, this channel is **not mocked**: it's real Web Push (VAPID),
+which needs no paid gateway account -- the browser's own push service
+handles delivery. `notification-service`'s `notifyUser()` (the one
+function every event handler already funnels through for SMS/email) now
+also attempts push, but only logs it -- and only ever attempts it at all
+-- for a citizen who has actually subscribed; a citizen who never enables
+it accumulates zero push-related log rows, not silent failures. A
+subscription the push service reports as gone (410/404) is cleaned up
+automatically rather than retried forever.
+
+What's genuinely verified by `tests/push-notifications.test.mjs` vs. what
+isn't: subscribing, re-subscribing, and unsubscribing all round-trip
+against the real database; a citizen with no subscription gets SMS as
+normal and *zero* PUSH log rows; a subscription pointing at an
+unreachable endpoint is actually attempted and logged `FAILED`, not
+silently swallowed. What it can't verify from here is whether a real
+browser actually renders the notification on screen -- that needs a real
+browser, which this environment doesn't have; see `apps/citizen-portal/src/sw.ts`
+for the `push` / `notificationclick` handlers if you want to read exactly
+what runs when one arrives.
+
 ## Developer portal
 
 http://localhost:4000/docs -- an interactive Swagger UI over the platform's
@@ -248,14 +282,15 @@ docker compose up -d   # stack must be running
 npm test
 ```
 
-64 integration tests against the live stack (no mocking, no direct DB
+69 integration tests against the live stack (no mocking, no direct DB
 access) covering auth/MFA (both the optional-at-login and full TOTP paths --
 see "Seed the two staff accounts" above), all three pilot services end to
 end (including the complaints reopen loop), analytics, the audit hash-chain,
 the USSD gateway (including PIN enrollment, PIN lockout, full Trading
 Licence and Birth Certificate applications submitted entirely over USSD,
 and fee payments over USSD that drive an application all the way to
-`UNDER_REVIEW`), document upload validation, and the developer portal. See
+`UNDER_REVIEW`), document upload validation, push notification subscribe/
+unsubscribe and delivery-attempt logging, and the developer portal. See
 `tests/README.md` for what's covered and, just as importantly, what isn't.
 
 **This suite already earned its keep once**: running it under real
@@ -415,12 +450,13 @@ monorepo's build tooling with it.
 - **Payments and SMS are mocked** (see `docs/ARCHITECTURE.md` → "What
   production would change") so the pilot runs without live telco/mobile
   money credentials.
-- **The PWA install/offline story covers the app shell, not push
-  notifications** -- the service worker precaches static assets so the app
-  opens with no network and is installable on Android/iOS home screens (see
-  "Install it as a mobile app" above), but there's no Web Push subscription
-  or server-side push trigger yet; notifications today are still SMS/email
-  only, delivered when the citizen next opens the app.
+- **Push notifications are real, not mocked** -- unlike SMS, Web Push needs
+  no paid gateway account, just the VAPID keypair in `docker-compose.yml`
+  (dev-only default; generate a real one with `npx web-push
+  generate-vapid-keys` before any non-local deployment). It's opt-in from
+  **Profile** in the portal, and it's genuinely tested end to end short of
+  a real browser actually rendering the notification -- see
+  `tests/push-notifications.test.mjs` for exactly where that line is drawn.
 - **Tests are integration-level only** (see `tests/`) -- they exercise the
   live stack through the gateway like a real client would, which is exactly
   what caught a real concurrency bug (below) that a unit test never would

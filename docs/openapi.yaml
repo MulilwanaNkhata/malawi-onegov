@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Malawi OneGov — Pilot Public API (via API Gateway)
-  version: 0.3.0
+  version: 0.4.0
   description: >
     Public surface exposed by the API gateway (http://localhost:4000/api) for
     all three pilot services -- Birth Certificate, Trading Licence, and
@@ -623,6 +623,54 @@ paths:
       summary: Current citizen's notification inbox
       responses:
         "200": { description: OK }
+  /notifications/push/public-key:
+    get:
+      summary: The public half of the VAPID keypair, needed by the browser to open a push subscription (not secret)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  publicKey: { type: string }
+        "503": { description: Push notifications are not configured on this deployment }
+  /notifications/push/subscribe:
+    post:
+      summary: Register (or re-register) the calling browser/device for push notifications
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint, keys]
+              properties:
+                endpoint: { type: string, format: uri }
+                keys:
+                  type: object
+                  required: [p256dh, auth]
+                  properties:
+                    p256dh: { type: string }
+                    auth: { type: string }
+      responses:
+        "204": { description: Subscribed }
+        "400": { description: Validation error }
+    delete:
+      summary: Turn off push notifications for the calling browser/device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint]
+              properties:
+                endpoint: { type: string, format: uri }
+      responses:
+        "204": { description: Unsubscribed }
+        "400": { description: Validation error }
   /audit:
     get:
       summary: Query the tamper-evident audit log (REGISTRAR_SUPERVISOR or SYSTEM_ADMIN only)

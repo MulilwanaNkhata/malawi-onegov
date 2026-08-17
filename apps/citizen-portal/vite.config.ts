@@ -7,8 +7,16 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      devOptions: { enabled: true },
+      devOptions: { enabled: true, type: "module" },
       includeAssets: ["favicon-32x32.png", "apple-touch-icon.png"],
+      // injectManifest (a hand-written service worker Workbox precaching is
+      // injected into) instead of generateSW -- generateSW's fully automatic
+      // worker has no hook for the push/notificationclick handlers push
+      // notifications need, so this is the smallest step up that still adds
+      // them without hand-rolling precaching too.
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       manifest: {
         name: "Malawi OneGov",
         short_name: "OneGov",
@@ -24,7 +32,7 @@ export default defineConfig({
           { src: "/maskable-icon-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
       },
-      workbox: {
+      injectManifest: {
         // Precache the built app shell (HTML/JS/CSS/icons) so the app opens
         // even with no network -- but never the /api/* responses themselves.
         // Government application/payment status has to stay live data; a
@@ -32,7 +40,6 @@ export default defineConfig({
         // misleading, so there is deliberately no runtime caching rule for
         // API calls here, only a fallback to the shell for client-side routing.
         globPatterns: ["**/*.{js,css,html,png,svg,ico}"],
-        navigateFallback: "/index.html",
       },
     }),
   ],

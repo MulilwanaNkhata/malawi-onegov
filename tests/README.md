@@ -34,6 +34,16 @@ dependency to install. Requires Node 20+.
   Swagger UI page, the live `docs/openapi.yaml` (not a stale copy -- spot
   checks routes that only exist because this spec was expanded this
   session), and its self-hosted static assets
+- `push-notifications.test.mjs` -- the VAPID public key is published,
+  subscribe/re-subscribe/unsubscribe round-trip cleanly, a malformed
+  endpoint is rejected, a citizen who never enabled push still gets SMS as
+  usual with no PUSH log row at all (the "opt-in, not spammed" contract),
+  and a subscription pointing at an unreachable endpoint is genuinely
+  attempted and logged FAILED rather than silently swallowed. What this
+  *can't* test from here: whether a real browser actually displays the
+  notification -- that needs a real browser, not this environment; see
+  `apps/citizen-portal/src/sw.ts` for the push/notificationclick handlers
+  and `docker-compose.yml`'s dev-only VAPID keypair
 - `birth-certificate.test.mjs` -- the full citizen+staff journey end to end,
   plus an ownership-isolation check and a role-boundary check on approval
 - `trading-license.test.mjs` -- the same, for the second pilot service, plus
